@@ -16,7 +16,7 @@ interface McpSession {
 
 const sessions = new Map<string, McpSession>();
 
-const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 
 function cleanupStaleSessions() {
   const now = Date.now();
@@ -51,6 +51,69 @@ function addCorsHeaders(response: Response): Response {
   });
 }
 
+function createSessionTransport() {
+  const server = createMcpServer();
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    sessionIdGenerator: () => randomUUID(),
+    enableJsonResponse: true,
+    onsessioninitialized: (newSessionId) => {
+      sessions.set(newSessionId, { transport, server, lastActivity: Date.now() });
+    },
+  });
+
+  transport.onclose = () => {
+    if (transport.sessionId) {
+      sessions.delete(transport.sessionId);
+    }
+  };
+
+  return { server, transport };
+}
+
+/**
+ * Auto-initialize a fresh server+transport so it can handle non-init requests.
+ * This is needed on serverless (Vercel) where in-memory sessions are lost
+ * between requests that hit different instances.
+ */
+async function autoInitialize(
+  transport: WebStandardStreamableHTTPServerTransport,
+  url: string,
+): Promise<void> {
+  const initReq = new Request(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream',
+    },
+  });
+
+  await transport.handleRequest(initReq, {
+    parsedBody: {
+      jsonrpc: '2.0',
+      id: '_auto_init',
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-03-26',
+        capabilities: {},
+        clientInfo: { name: 'ycode-auto', version: '1.0.0' },
+      },
+    },
+  });
+
+  const notifReq = new Request(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream',
+      'mcp-session-id': transport.sessionId!,
+    },
+  });
+
+  await transport.handleRequest(notifReq, {
+    parsedBody: { jsonrpc: '2.0', method: 'notifications/initialized' },
+  });
+}
+
 async function handleMcpRequest(request: Request): Promise<Response> {
   const sessionId = request.headers.get('mcp-session-id');
 
@@ -60,30 +123,44 @@ async function handleMcpRequest(request: Request): Promise<Response> {
     return session.transport.handleRequest(request);
   }
 
-  if (request.method === 'POST') {
-    const transport = new WebStandardStreamableHTTPServerTransport({
-      sessionIdGenerator: () => randomUUID(),
-      onsessioninitialized: (newSessionId) => {
-        sessions.set(newSessionId, { transport, server, lastActivity: Date.now() });
-      },
+  if (request.method !== 'POST') {
+    return new Response(JSON.stringify({
+      jsonrpc: '2.0',
+      error: { code: -32000, message: 'Session expired. Send a new initialize request.' },
+      id: null,
+    }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
     });
-
-    const server = createMcpServer();
-
-    transport.onclose = () => {
-      if (transport.sessionId) {
-        sessions.delete(transport.sessionId);
-      }
-    };
-
-    await server.connect(transport);
-    return transport.handleRequest(request);
   }
 
-  return new Response(JSON.stringify({ error: 'Invalid session' }), {
-    status: 400,
-    headers: { 'Content-Type': 'application/json' },
+  const body = await request.json();
+  const isInit = !Array.isArray(body) && body.method === 'initialize';
+
+  const { server, transport } = createSessionTransport();
+  await server.connect(transport);
+
+  if (isInit) {
+    const req = new Request(request.url, {
+      method: 'POST',
+      headers: request.headers,
+    });
+    return transport.handleRequest(req, { parsedBody: body });
+  }
+
+  // Session was lost (serverless instance recycled) — auto-initialize
+  await autoInitialize(transport, request.url);
+
+  const actualReq = new Request(request.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream',
+      'mcp-session-id': transport.sessionId!,
+    },
   });
+
+  return transport.handleRequest(actualReq, { parsedBody: body });
 }
 
 export async function POST(
@@ -92,17 +169,29 @@ export async function POST(
 ) {
   const { token } = await params;
 
-  const isValid = await authenticateToken(token);
-  if (!isValid) {
-    return new Response(JSON.stringify({ error: 'Invalid MCP token' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
+  try {
+    const isValid = await authenticateToken(token);
+    if (!isValid) {
+      return new Response(JSON.stringify({ error: 'Invalid MCP token' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
-  cleanupStaleSessions();
-  const response = await handleMcpRequest(request);
-  return addCorsHeaders(response);
+    cleanupStaleSessions();
+    const response = await handleMcpRequest(request);
+    return addCorsHeaders(response);
+  } catch (error) {
+    console.error('[MCP POST] Error:', error);
+    return addCorsHeaders(new Response(JSON.stringify({
+      jsonrpc: '2.0',
+      error: { code: -32603, message: error instanceof Error ? error.message : 'Internal server error' },
+      id: null,
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+  }
 }
 
 export async function GET(
@@ -111,26 +200,42 @@ export async function GET(
 ) {
   const { token } = await params;
 
-  const isValid = await authenticateToken(token);
-  if (!isValid) {
-    return new Response(JSON.stringify({ error: 'Invalid MCP token' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
+  try {
+    const isValid = await authenticateToken(token);
+    if (!isValid) {
+      return new Response(JSON.stringify({ error: 'Invalid MCP token' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
-  const sessionId = request.headers.get('mcp-session-id');
-  if (!sessionId || !sessions.has(sessionId)) {
-    return new Response(JSON.stringify({ error: 'Invalid session. Send a POST first.' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
+    const sessionId = request.headers.get('mcp-session-id');
+    if (!sessionId || !sessions.has(sessionId)) {
+      return addCorsHeaders(new Response(JSON.stringify({
+        jsonrpc: '2.0',
+        error: { code: -32000, message: 'Session not found. Send a POST initialize first.' },
+        id: null,
+      }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    }
 
-  const session = sessions.get(sessionId)!;
-  session.lastActivity = Date.now();
-  const response = await session.transport.handleRequest(request);
-  return addCorsHeaders(response);
+    const session = sessions.get(sessionId)!;
+    session.lastActivity = Date.now();
+    const response = await session.transport.handleRequest(request);
+    return addCorsHeaders(response);
+  } catch (error) {
+    console.error('[MCP GET] Error:', error);
+    return addCorsHeaders(new Response(JSON.stringify({
+      jsonrpc: '2.0',
+      error: { code: -32603, message: error instanceof Error ? error.message : 'Internal server error' },
+      id: null,
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+  }
 }
 
 export async function DELETE(
@@ -139,26 +244,28 @@ export async function DELETE(
 ) {
   const { token } = await params;
 
-  const isValid = await authenticateToken(token);
-  if (!isValid) {
-    return new Response(JSON.stringify({ error: 'Invalid MCP token' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
+  try {
+    const isValid = await authenticateToken(token);
+    if (!isValid) {
+      return new Response(JSON.stringify({ error: 'Invalid MCP token' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
-  const sessionId = request.headers.get('mcp-session-id');
-  if (sessionId && sessions.has(sessionId)) {
-    const session = sessions.get(sessionId)!;
-    await session.transport.close();
-    sessions.delete(sessionId);
+    const sessionId = request.headers.get('mcp-session-id');
+    if (sessionId && sessions.has(sessionId)) {
+      const session = sessions.get(sessionId)!;
+      await session.transport.close();
+      sessions.delete(sessionId);
+      return addCorsHeaders(new Response(null, { status: 204 }));
+    }
+
+    return addCorsHeaders(new Response(null, { status: 204 }));
+  } catch (error) {
+    console.error('[MCP DELETE] Error:', error);
     return addCorsHeaders(new Response(null, { status: 204 }));
   }
-
-  return addCorsHeaders(new Response(JSON.stringify({ error: 'Session not found' }), {
-    status: 404,
-    headers: { 'Content-Type': 'application/json' },
-  }));
 }
 
 export async function OPTIONS() {
