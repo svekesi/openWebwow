@@ -35,6 +35,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuCheckboxItem,
 } from '@/components/ui/dropdown-menu';
 import {
   Select,
@@ -954,31 +955,48 @@ export default function SelectOptionsSettings({
 
             {sortByCollectionId && (
               <>
-                <div className="flex items-center gap-2 pt-1">
-                  <span className="text-xs text-muted-foreground whitespace-nowrap">Fields</span>
-                  <div className="h-px flex-1 bg-border" />
+                <div className="grid grid-cols-3 items-center">
+
+                  <Label variant="muted">Fields</Label>
+
+                  {sortByCollectionFields.length === 0 ? (
+                    <div className="text-xs text-muted-foreground px-1 col-span-2">Loading fields...</div>
+                  ) : (
+                    <div className="col-span-2">
+                      <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="input"
+                          size="sm"
+                          className="w-full justify-between font-normal"
+                        >
+                          <span className="truncate">
+                            {sortByFieldIds.length === 0
+                              ? 'Select fields...'
+                              : `${sortByFieldIds.length} field${sortByFieldIds.length > 1 ? 's' : ''} selected`}
+                          </span>
+                          <div className="ml-2">
+                            <Icon name="chevronCombo" className="size-2.5 opacity-50" />
+                          </div>
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)]">
+                        {sortByCollectionFields.map((field) => (
+                          <DropdownMenuCheckboxItem
+                            key={field.id}
+                            checked={sortByFieldIds.includes(field.id)}
+                            onCheckedChange={() => handleToggleSortByField(field.id)}
+                            onSelect={(e) => e.preventDefault()}
+                          >
+                            {field.name}
+                          </DropdownMenuCheckboxItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    </div>
+                  )}
+
                 </div>
-                {sortByCollectionFields.length === 0 ? (
-                  <div className="text-xs text-muted-foreground px-1">Loading fields...</div>
-                ) : (
-                  <div className="flex flex-col gap-0.5">
-                    {sortByCollectionFields.map((field) => (
-                      <label
-                        key={field.id}
-                        className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted cursor-pointer text-xs"
-                      >
-                        <input
-                          type="checkbox"
-                          className="rounded border-border"
-                          checked={sortByFieldIds.includes(field.id)}
-                          onChange={() => handleToggleSortByField(field.id)}
-                        />
-                        <span className="truncate">{field.name}</span>
-                        <span className="ml-auto text-muted-foreground text-[10px] shrink-0">{field.type}</span>
-                      </label>
-                    ))}
-                  </div>
-                )}
               </>
             )}
           </>
