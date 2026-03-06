@@ -305,7 +305,7 @@ export function getOptimizedImageUrl(
  * Creates optimized URLs for different viewport widths
  * @param url - Original image URL
  * @param sizes - Array of widths in pixels (default: [640, 960, 1280, 1920, 2560])
- * @param quality - Image quality 0-100 (default: 85)
+ * @param quality - Image quality 0-100 (default: 100)
  * @returns Srcset string with multiple size options
  *
  * @example
@@ -315,7 +315,7 @@ export function getOptimizedImageUrl(
 export function generateImageSrcset(
   url: string,
   sizes: number[] = [640, 960, 1280, 1920, 2560],
-  quality: number = 85
+  quality: number = 100
 ): string {
   if (!isTransformableUrl(url)) return '';
 

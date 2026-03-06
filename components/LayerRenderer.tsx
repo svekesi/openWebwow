@@ -1703,7 +1703,7 @@ const LayerItem: React.FC<{
       const finalImageUrl = imageUrl && imageUrl.trim() !== '' ? imageUrl : DEFAULT_ASSETS.IMAGE;
 
       // Generate optimized src and srcset for responsive images
-      const optimizedSrc = getOptimizedImageUrl(finalImageUrl, 1920, 1920, 85);
+      const optimizedSrc = getOptimizedImageUrl(finalImageUrl, 1920, 1920, 100);
       const srcset = generateImageSrcset(finalImageUrl);
       const sizes = getImageSizes();
 

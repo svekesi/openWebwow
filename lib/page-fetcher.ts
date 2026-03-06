@@ -3079,7 +3079,7 @@ function layerToHtml(
       }
       // Only add src if we have a valid URL (not empty string)
       if (srcValue && srcValue.trim()) {
-        const optimizedSrc = getOptimizedImageUrl(srcValue, 1920, 1920, 85);
+        const optimizedSrc = getOptimizedImageUrl(srcValue, 1920, 1920, 100);
         attrs.push(`src="${escapeHtml(optimizedSrc)}"`);
 
         // Generate srcset for responsive images
