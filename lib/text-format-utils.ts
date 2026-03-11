@@ -229,6 +229,33 @@ export function getTiptapTextContent(text: string): {
 }
 
 /**
+ * Flatten multi-paragraph Tiptap content into a single paragraph with hardBreak nodes.
+ * Used for heading/text elements that should not contain nested block elements.
+ * Converts: [paragraph("a"), paragraph("b")] → [paragraph("a", hardBreak, "b")]
+ */
+export function flattenTiptapParagraphs(content: any): any {
+  if (!content || typeof content !== 'object' || content.type !== 'doc') return content;
+  const blocks = content.content;
+  if (!Array.isArray(blocks) || blocks.length <= 1) return content;
+
+  const merged: any[] = [];
+  blocks.forEach((block: any, i: number) => {
+    if (block.type !== 'paragraph') return;
+    if (i > 0 && merged.length > 0) {
+      merged.push({ type: 'hardBreak' });
+    }
+    if (block.content && Array.isArray(block.content)) {
+      merged.push(...block.content);
+    }
+  });
+
+  return {
+    type: 'doc',
+    content: [{ type: 'paragraph', content: merged }],
+  };
+}
+
+/**
  * Get variable node metadata and raw value
  * Returns the field type and raw value (useful for rich_text handling)
  */
@@ -634,6 +661,10 @@ function renderInlineContent(
     if (node.type === 'richTextComponent' && node.attrs?.componentId) {
       const rendered = renderRichTextComponentBlock(node, key, components, renderComponentBlock, ancestorComponentIds);
       return rendered ? [rendered] : [];
+    }
+
+    if (node.type === 'hardBreak') {
+      return [React.createElement('br', { key })];
     }
 
     // Handle list nodes that were preserved during flattening

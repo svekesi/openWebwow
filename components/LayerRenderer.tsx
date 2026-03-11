@@ -26,7 +26,7 @@ import { generateImageSrcset, getImageSizes, getOptimizedImageUrl } from '@/lib/
 import { useEditorStore } from '@/stores/useEditorStore';
 import { toast } from 'sonner';
 import { resolveInlineVariablesFromData } from '@/lib/inline-variables';
-import { renderRichText, hasBlockElementsWithInlineVariables, getTextStyleClasses, type RichTextLinkContext, type RenderComponentBlockFn } from '@/lib/text-format-utils';
+import { renderRichText, hasBlockElementsWithInlineVariables, getTextStyleClasses, flattenTiptapParagraphs, type RichTextLinkContext, type RenderComponentBlockFn } from '@/lib/text-format-utils';
 import { hasComponentOrVariable } from '@/lib/tiptap-utils';
 import LayerContextMenu from '@/app/ycode/components/LayerContextMenu';
 import CanvasTextEditor from '@/app/ycode/components/CanvasTextEditor';
@@ -532,12 +532,15 @@ const LayerItem: React.FC<{
 
   let htmlTag = getLayerHtmlTag(layer);
 
+  // Heading/text elements hold plain text — no rich text block handling needed
+  const isSimpleTextLayer = layer.name === 'heading' || layer.name === 'text';
+
   // Check if we need to override the tag for rich text with block elements
   // Tags like <p>, <h1>-<h6> cannot contain block elements like <ul>/<ol>
   const textVariable = layer.variables?.text;
   let useSpanForParagraphs = false;
 
-  {
+  if (!isSimpleTextLayer) {
     const restrictiveBlockTags = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'button'];
     const isRestrictiveTag = restrictiveBlockTags.includes(htmlTag);
 
@@ -865,9 +868,11 @@ const LayerItem: React.FC<{
 
     // Check for DynamicRichTextVariable format (with formatting)
     if (textVariable?.type === 'dynamic_rich_text') {
-      // Render rich text with formatting (bold, italic, etc.) and inline variables
-      // In edit mode, adds data-style attributes for style selection
-      return renderRichText(textVariable as any, collectionLayerData, pageCollectionItemData || undefined, layer.textStyles, useSpanForParagraphs, isEditMode, linkContext, timezone, effectiveLayerDataMap, allComponents, renderComponentBlock, effectiveAncestorIds);
+      // For heading/text elements, flatten multi-paragraph content into single paragraph with <br>
+      const variable = isSimpleTextLayer
+        ? { ...textVariable, data: { ...textVariable.data, content: flattenTiptapParagraphs(textVariable.data.content) } }
+        : textVariable;
+      return renderRichText(variable as any, collectionLayerData, pageCollectionItemData || undefined, layer.textStyles, useSpanForParagraphs, isEditMode, linkContext, timezone, effectiveLayerDataMap, allComponents, renderComponentBlock, effectiveAncestorIds);
     }
 
     // Check for inline variables in DynamicTextVariable format (legacy)
@@ -1331,9 +1336,9 @@ const LayerItem: React.FC<{
   // Show projection indicator if this is being dragged over
   const showProjection = projected && activeLayerId && activeLayerId !== layer.id;
 
-  // Build className with editor states if in edit mode
-  // When layer tag is p and has text, add paragraph default classes (block, margin) so the wrapper displays correctly
-  const paragraphClasses = htmlTag === 'p' && layer.variables?.text
+  // For rich text elements, add paragraph default classes when tag is <p>
+  // Skip for heading/text — they render their own tag directly
+  const paragraphClasses = !isSimpleTextLayer && htmlTag === 'p' && layer.variables?.text
     ? getTextStyleClasses(layer.textStyles, 'paragraph')
     : '';
 
