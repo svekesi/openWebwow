@@ -641,15 +641,17 @@ const INLINE_STYLE_KEYS = ['bold', 'italic', 'underline', 'strike', 'link'];
 export function getTextStyleSublayers(layer: Layer): RichTextSublayer[] {
   if (!isTextContentLayer(layer) && !isRichTextLayer(layer)) return [];
 
-  const keys = INLINE_STYLE_KEYS;
+  const textVar = layer.variables?.text;
+  const doc = textVar?.type === 'dynamic_rich_text' ? (textVar.data as any)?.content : null;
+  const usedMarks = doc ? extractInlineMarks(doc) : [];
 
   const allStyles = {
     ...DEFAULT_TEXT_STYLES,
     ...layer.textStyles,
   };
 
-  return keys
-    .filter(key => !key.startsWith('dts-'))
+  return INLINE_STYLE_KEYS
+    .filter(key => usedMarks.includes(key))
     .map(key => ({
       type: key,
       label: allStyles[key]?.label || key,
