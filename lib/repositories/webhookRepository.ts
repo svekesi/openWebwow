@@ -1,4 +1,4 @@
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getKnexClient } from '@/lib/knex-client';
 
 /**
  * Webhook Repository
@@ -98,20 +98,11 @@ export interface UpdateWebhookDeliveryData {
  * Get all webhooks
  */
 export async function getAllWebhooks(): Promise<Webhook[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('webhooks')
+  const data = await db('webhooks')
     .select('*')
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    throw new Error(`Failed to fetch webhooks: ${error.message}`);
-  }
+    .orderBy('created_at', 'desc');
 
   return (data || []).map(mapWebhookFromDb);
 }
@@ -120,21 +111,12 @@ export async function getAllWebhooks(): Promise<Webhook[]> {
  * Get webhook by ID
  */
 export async function getWebhookById(id: string): Promise<Webhook | null> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('webhooks')
+  const data = await db('webhooks')
     .select('*')
-    .eq('id', id)
-    .single();
-
-  if (error && error.code !== 'PGRST116') {
-    throw new Error(`Failed to fetch webhook: ${error.message}`);
-  }
+    .where('id', id)
+    .first();
 
   return data ? mapWebhookFromDb(data) : null;
 }
@@ -143,20 +125,11 @@ export async function getWebhookById(id: string): Promise<Webhook | null> {
  * Get all enabled webhooks for a specific event type
  */
 export async function getWebhooksForEvent(eventType: WebhookEventType): Promise<Webhook[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('webhooks')
+  const data = await db('webhooks')
     .select('*')
-    .eq('enabled', true);
-
-  if (error) {
-    throw new Error(`Failed to fetch webhooks for event: ${error.message}`);
-  }
+    .where('enabled', true);
 
   // Filter by event type in JS to avoid PostgREST JSONB contains serialization issues
   return (data || [])
@@ -168,31 +141,21 @@ export async function getWebhooksForEvent(eventType: WebhookEventType): Promise<
  * Create a new webhook
  */
 export async function createWebhook(webhookData: CreateWebhookData): Promise<Webhook> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('webhooks')
+  const [data] = await db('webhooks')
     .insert({
       name: webhookData.name,
       url: webhookData.url,
       secret: webhookData.secret || null,
-      events: webhookData.events,
-      filters: webhookData.filters || null,
+      events: JSON.stringify(webhookData.events),
+      filters: webhookData.filters ? JSON.stringify(webhookData.filters) : null,
       enabled: true,
       failure_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to create webhook: ${error.message}`);
-  }
+    .returning('*');
 
   return mapWebhookFromDb(data);
 }
@@ -201,11 +164,7 @@ export async function createWebhook(webhookData: CreateWebhookData): Promise<Web
  * Update a webhook
  */
 export async function updateWebhook(id: string, updates: UpdateWebhookData): Promise<Webhook> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   const updateData: Record<string, unknown> = {
     updated_at: new Date().toISOString(),
@@ -214,20 +173,14 @@ export async function updateWebhook(id: string, updates: UpdateWebhookData): Pro
   if (updates.name !== undefined) updateData.name = updates.name;
   if (updates.url !== undefined) updateData.url = updates.url;
   if (updates.secret !== undefined) updateData.secret = updates.secret;
-  if (updates.events !== undefined) updateData.events = updates.events;
-  if (updates.filters !== undefined) updateData.filters = updates.filters;
+  if (updates.events !== undefined) updateData.events = JSON.stringify(updates.events);
+  if (updates.filters !== undefined) updateData.filters = updates.filters ? JSON.stringify(updates.filters) : null;
   if (updates.enabled !== undefined) updateData.enabled = updates.enabled;
 
-  const { data, error } = await client
-    .from('webhooks')
+  const [data] = await db('webhooks')
+    .where('id', id)
     .update(updateData)
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to update webhook: ${error.message}`);
-  }
+    .returning('*');
 
   return mapWebhookFromDb(data);
 }
@@ -236,44 +189,34 @@ export async function updateWebhook(id: string, updates: UpdateWebhookData): Pro
  * Delete a webhook
  */
 export async function deleteWebhook(id: string): Promise<void> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { error } = await client
-    .from('webhooks')
-    .delete()
-    .eq('id', id);
-
-  if (error) {
-    throw new Error(`Failed to delete webhook: ${error.message}`);
-  }
+  await db('webhooks')
+    .where('id', id)
+    .delete();
 }
 
 /**
  * Update webhook trigger timestamp and reset failure count on success
  */
 export async function markWebhookTriggered(id: string, success: boolean): Promise<void> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   if (success) {
-    await client
-      .from('webhooks')
+    await db('webhooks')
+      .where('id', id)
       .update({
         last_triggered_at: new Date().toISOString(),
         failure_count: 0,
         updated_at: new Date().toISOString(),
-      })
-      .eq('id', id);
+      });
   } else {
-    // Increment failure count
-    await client.rpc('increment_webhook_failure_count', { webhook_id: id });
+    await db('webhooks')
+      .where('id', id)
+      .update({
+        failure_count: db.raw('failure_count + 1'),
+        updated_at: new Date().toISOString(),
+      });
   }
 }
 
@@ -281,34 +224,14 @@ export async function markWebhookTriggered(id: string, success: boolean): Promis
  * Increment webhook failure count (called when delivery fails)
  */
 export async function incrementWebhookFailureCount(id: string): Promise<void> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  // Use raw SQL to increment
-  const { error } = await client
-    .from('webhooks')
+  await db('webhooks')
+    .where('id', id)
     .update({
-      failure_count: client.rpc('increment', { x: 1 }) as unknown as number,
+      failure_count: db.raw('failure_count + 1'),
       updated_at: new Date().toISOString(),
-    })
-    .eq('id', id);
-
-  // Fallback: fetch and update if rpc fails
-  if (error) {
-    const webhook = await getWebhookById(id);
-    if (webhook) {
-      await client
-        .from('webhooks')
-        .update({
-          failure_count: webhook.failure_count + 1,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', id);
-    }
-  }
+    });
 }
 
 // =============================================================================
@@ -321,28 +244,18 @@ export async function incrementWebhookFailureCount(id: string): Promise<void> {
 export async function createWebhookDelivery(
   deliveryData: CreateWebhookDeliveryData
 ): Promise<WebhookDelivery> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('webhook_deliveries')
+  const [data] = await db('webhook_deliveries')
     .insert({
       webhook_id: deliveryData.webhook_id,
       event_type: deliveryData.event_type,
-      payload: deliveryData.payload,
+      payload: JSON.stringify(deliveryData.payload),
       status: deliveryData.status || 'pending',
       attempts: deliveryData.attempts || 1,
       created_at: new Date().toISOString(),
     })
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to create webhook delivery: ${error.message}`);
-  }
+    .returning('*');
 
   return data as WebhookDelivery;
 }
@@ -354,20 +267,11 @@ export async function updateWebhookDelivery(
   id: string,
   updates: UpdateWebhookDeliveryData
 ): Promise<void> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { error } = await client
-    .from('webhook_deliveries')
-    .update(updates)
-    .eq('id', id);
-
-  if (error) {
-    throw new Error(`Failed to update webhook delivery: ${error.message}`);
-  }
+  await db('webhook_deliveries')
+    .where('id', id)
+    .update(updates);
 }
 
 /**
@@ -377,40 +281,27 @@ export async function getWebhookDeliveries(
   webhookId: string,
   options: { limit?: number; offset?: number } = {}
 ): Promise<{ deliveries: WebhookDelivery[]; total: number }> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   const limit = options.limit || 50;
   const offset = options.offset || 0;
 
   // Get total count
-  const { count, error: countError } = await client
-    .from('webhook_deliveries')
-    .select('*', { count: 'exact', head: true })
-    .eq('webhook_id', webhookId);
-
-  if (countError) {
-    throw new Error(`Failed to count webhook deliveries: ${countError.message}`);
-  }
+  const [{ count }] = await db('webhook_deliveries')
+    .count('* as count')
+    .where('webhook_id', webhookId);
 
   // Get paginated results
-  const { data, error } = await client
-    .from('webhook_deliveries')
+  const data = await db('webhook_deliveries')
     .select('*')
-    .eq('webhook_id', webhookId)
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1);
-
-  if (error) {
-    throw new Error(`Failed to fetch webhook deliveries: ${error.message}`);
-  }
+    .where('webhook_id', webhookId)
+    .orderBy('created_at', 'desc')
+    .limit(limit)
+    .offset(offset);
 
   return {
     deliveries: (data || []) as WebhookDelivery[],
-    total: count || 0,
+    total: Number(count) || 0,
   };
 }
 
@@ -418,26 +309,16 @@ export async function getWebhookDeliveries(
  * Delete old webhook deliveries (cleanup)
  */
 export async function deleteOldWebhookDeliveries(olderThanDays: number = 30): Promise<number> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
 
-  const { data, error } = await client
-    .from('webhook_deliveries')
-    .delete()
-    .lt('created_at', cutoffDate.toISOString())
-    .select('id');
+  const deletedCount = await db('webhook_deliveries')
+    .where('created_at', '<', cutoffDate.toISOString())
+    .delete();
 
-  if (error) {
-    throw new Error(`Failed to delete old webhook deliveries: ${error.message}`);
-  }
-
-  return data?.length || 0;
+  return deletedCount;
 }
 
 // =============================================================================

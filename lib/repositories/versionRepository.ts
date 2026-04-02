@@ -1,4 +1,5 @@
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getKnexClient } from '@/lib/knex-client';
+import { jsonb } from '@/lib/knex-helpers';
 import type { Version, CreateVersionData, VersionEntityType, VersionHistoryItem } from '@/types';
 
 /**
@@ -16,37 +17,26 @@ export const MAX_VERSIONS_PER_ENTITY = 50; // Maximum versions to keep per entit
  * Automatically deletes oldest versions if limit is reached
  */
 export async function createVersion(data: CreateVersionData): Promise<Version> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const db = await getKnexClient();
 
   // Enforce version limit (keep only MAX_VERSIONS_PER_ENTITY - 1 to make room for new version)
   await enforceVersionLimit(data.entity_type, data.entity_id, MAX_VERSIONS_PER_ENTITY - 1);
 
-  // Insert new version
-  const { data: result, error } = await client
-    .from('versions')
+  const [result] = await db('versions')
     .insert({
       entity_type: data.entity_type,
       entity_id: data.entity_id,
       action_type: data.action_type,
       description: data.description || null,
-      redo: data.redo,
-      undo: data.undo || null,
-      snapshot: data.snapshot || null,
+      redo: jsonb(data.redo),
+      undo: jsonb(data.undo || null),
+      snapshot: jsonb(data.snapshot || null),
       previous_hash: data.previous_hash || null,
       current_hash: data.current_hash,
       session_id: data.session_id || null,
-      metadata: data.metadata || null,
+      metadata: jsonb(data.metadata || null),
     })
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to create version: ${error.message}`);
-  }
+    .returning('*');
 
   return result;
 }
@@ -60,23 +50,15 @@ export async function getVersionHistory(
   limit: number = 50,
   offset: number = 0
 ): Promise<Version[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('versions')
+  const data = await db('versions')
     .select('*')
-    .eq('entity_type', entityType)
-    .eq('entity_id', entityId)
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1);
-
-  if (error) {
-    throw new Error(`Failed to fetch version history: ${error.message}`);
-  }
+    .where('entity_type', entityType)
+    .where('entity_id', entityId)
+    .orderBy('created_at', 'desc')
+    .limit(limit)
+    .offset(offset);
 
   return data || [];
 }
@@ -89,23 +71,14 @@ export async function getVersionHistorySummary(
   entityId: string,
   limit: number = 50
 ): Promise<VersionHistoryItem[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('versions')
-    .select('id, action_type, description, created_at')
-    .eq('entity_type', entityType)
-    .eq('entity_id', entityId)
-    .order('created_at', { ascending: false })
+  const data = await db('versions')
+    .select('id', 'action_type', 'description', 'created_at')
+    .where('entity_type', entityType)
+    .where('entity_id', entityId)
+    .orderBy('created_at', 'desc')
     .limit(limit);
-
-  if (error) {
-    throw new Error(`Failed to fetch version history summary: ${error.message}`);
-  }
 
   return data || [];
 }
@@ -114,26 +87,14 @@ export async function getVersionHistorySummary(
  * Get a specific version by ID
  */
 export async function getVersionById(id: string): Promise<Version | null> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('versions')
+  const data = await db('versions')
     .select('*')
-    .eq('id', id)
-    .single();
+    .where('id', id)
+    .first();
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null;
-    }
-    throw new Error(`Failed to fetch version: ${error.message}`);
-  }
-
-  return data;
+  return data || null;
 }
 
 /**
@@ -143,29 +104,16 @@ export async function getLatestVersion(
   entityType: VersionEntityType,
   entityId: string
 ): Promise<Version | null> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('versions')
+  const data = await db('versions')
     .select('*')
-    .eq('entity_type', entityType)
-    .eq('entity_id', entityId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single();
+    .where('entity_type', entityType)
+    .where('entity_id', entityId)
+    .orderBy('created_at', 'desc')
+    .first();
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null;
-    }
-    throw new Error(`Failed to fetch latest version: ${error.message}`);
-  }
-
-  return data;
+  return data || null;
 }
 
 /**
@@ -175,23 +123,14 @@ export async function getVersionCount(
   entityType: VersionEntityType,
   entityId: string
 ): Promise<number> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const [{ count }] = await db('versions')
+    .count('* as count')
+    .where('entity_type', entityType)
+    .where('entity_id', entityId);
 
-  const { count, error } = await client
-    .from('versions')
-    .select('*', { count: 'exact', head: true })
-    .eq('entity_type', entityType)
-    .eq('entity_id', entityId);
-
-  if (error) {
-    throw new Error(`Failed to count versions: ${error.message}`);
-  }
-
-  return count || 0;
+  return Number(count) || 0;
 }
 
 /**
@@ -212,27 +151,18 @@ export async function getLatestSnapshot(
   entityType: VersionEntityType,
   entityId: string
 ): Promise<{ version: Version; snapshot: object } | null> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('versions')
+  const data = await db('versions')
     .select('*')
-    .eq('entity_type', entityType)
-    .eq('entity_id', entityId)
-    .not('snapshot', 'is', null)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single();
+    .where('entity_type', entityType)
+    .where('entity_id', entityId)
+    .whereNotNull('snapshot')
+    .orderBy('created_at', 'desc')
+    .first();
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null;
-    }
-    throw new Error(`Failed to fetch latest snapshot: ${error.message}`);
+  if (!data) {
+    return null;
   }
 
   return data?.snapshot ? { version: data, snapshot: data.snapshot as object } : null;
@@ -247,42 +177,33 @@ export async function enforceVersionLimit(
   entityId?: string,
   maxVersions: number = MAX_VERSIONS_PER_ENTITY
 ): Promise<number> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const db = await getKnexClient();
 
   let totalDeleted = 0;
 
   // If specific entity provided, cleanup only that entity
   if (entityType && entityId) {
-    const { data: allVersions } = await client
-      .from('versions')
+    const allVersions = await db('versions')
       .select('id')
-      .eq('entity_type', entityType)
-      .eq('entity_id', entityId)
-      .order('created_at', { ascending: false });
+      .where('entity_type', entityType)
+      .where('entity_id', entityId)
+      .orderBy('created_at', 'desc');
 
     if (allVersions && allVersions.length > maxVersions) {
       const idsToDelete = allVersions.slice(maxVersions).map(v => v.id);
-      const { error: deleteError } = await client
-        .from('versions')
-        .delete()
-        .in('id', idsToDelete);
+      const deleted = await db('versions')
+        .whereIn('id', idsToDelete)
+        .delete();
 
-      if (!deleteError) {
-        totalDeleted = idsToDelete.length;
-      }
+      totalDeleted = deleted;
     }
 
     return totalDeleted;
   }
 
   // Otherwise, cleanup all entities
-  const { data: entities } = await client
-    .from('versions')
-    .select('entity_type, entity_id');
+  const entities = await db('versions')
+    .select('entity_type', 'entity_id');
 
   if (!entities) {
     return 0;
@@ -311,11 +232,7 @@ export async function enforceVersionLimit(
 export async function cleanupOldVersions(
   olderThanDays: number = 30
 ): Promise<number> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const db = await getKnexClient();
 
   let totalDeleted = 0;
 
@@ -323,17 +240,11 @@ export async function cleanupOldVersions(
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
 
-  const { data: oldVersions, error: oldError } = await client
-    .from('versions')
-    .delete()
-    .lt('created_at', cutoffDate.toISOString())
-    .select('id');
+  const deletedCount = await db('versions')
+    .where('created_at', '<', cutoffDate.toISOString())
+    .delete();
 
-  if (oldError) {
-    console.error('Failed to cleanup old versions:', oldError);
-  } else {
-    totalDeleted += oldVersions?.length || 0;
-  }
+  totalDeleted += deletedCount;
 
   // 2. Enforce MAX_VERSIONS_PER_ENTITY limit for all entities
   const limitDeleted = await enforceVersionLimit();
@@ -346,21 +257,12 @@ export async function cleanupOldVersions(
  * Get versions by session ID (for grouped operations)
  */
 export async function getVersionsBySession(sessionId: string): Promise<Version[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('versions')
+  const data = await db('versions')
     .select('*')
-    .eq('session_id', sessionId)
-    .order('created_at', { ascending: true });
-
-  if (error) {
-    throw new Error(`Failed to fetch versions by session: ${error.message}`);
-  }
+    .where('session_id', sessionId)
+    .orderBy('created_at', 'asc');
 
   return data || [];
 }
@@ -373,19 +275,10 @@ export async function deleteVersionsForEntity(
   entityType: VersionEntityType,
   entityId: string
 ): Promise<void> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { error } = await client
-    .from('versions')
-    .delete()
-    .eq('entity_type', entityType)
-    .eq('entity_id', entityId);
-
-  if (error) {
-    throw new Error(`Failed to delete versions: ${error.message}`);
-  }
+  await db('versions')
+    .where('entity_type', entityType)
+    .where('entity_id', entityId)
+    .delete();
 }

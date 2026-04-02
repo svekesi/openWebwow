@@ -1,4 +1,4 @@
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getKnexClient } from '@/lib/knex-client';
 import type { CollectionItemValue, CollectionFieldType } from '@/types';
 import { castValue, valueToString } from '../collection-utils';
 import { generateCollectionItemContentHash } from '../hash-utils';
@@ -10,7 +10,7 @@ import { deleteTranslationsInBulk, markTranslationsIncomplete } from '@/lib/repo
  *
  * Handles CRUD operations for collection item values (EAV values).
  * Each value represents one field value for one item.
- * Uses Supabase/PostgreSQL via admin client.
+ * Uses Knex/PostgreSQL query builder.
  *
  * NOTE: Uses composite primary key (id, is_published) architecture.
  * References items using FK (item_id).
@@ -19,16 +19,12 @@ import { deleteTranslationsInBulk, markTranslationsIncomplete } from '@/lib/repo
 
 /** Update the content_hash on a collection_items row */
 async function updateContentHash(itemId: string, isPublished: boolean, hash: string): Promise<void> {
-  const client = await getSupabaseAdmin();
-  if (!client) throw new Error('Supabase client not configured');
+  const db = await getKnexClient();
 
-  const { error } = await client
-    .from('collection_items')
-    .update({ content_hash: hash, updated_at: new Date().toISOString() })
-    .eq('id', itemId)
-    .eq('is_published', isPublished);
-
-  if (error) throw new Error(`Failed to update content_hash: ${error.message}`);
+  await db('collection_items')
+    .where('id', itemId)
+    .where('is_published', isPublished)
+    .update({ content_hash: hash, updated_at: new Date().toISOString() });
 }
 
 export interface CreateCollectionItemValueData {
@@ -45,11 +41,7 @@ export interface CreateCollectionItemValueData {
 export async function insertValuesBulk(
   values: Array<{ item_id: string; field_id: string; value: string | null; is_published?: boolean }>
 ): Promise<void> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   if (values.length === 0) return;
 
@@ -64,13 +56,8 @@ export async function insertValuesBulk(
     updated_at: now,
   }));
 
-  const { error } = await client
-    .from('collection_item_values')
+  await db('collection_item_values')
     .insert(valuesToInsert);
-
-  if (error) {
-    throw new Error(`Failed to bulk insert values: ${error.message}`);
-  }
 
   // Compute and store content_hash per item
   const valuesByItem = new Map<string, Array<{ field_id: string; value: string | null; is_published: boolean }>>();
@@ -98,39 +85,39 @@ export async function getValuesByItemIds(
   item_ids: string[],
   is_published: boolean = false
 ): Promise<Record<string, Record<string, any>>> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   if (item_ids.length === 0) {
     return {};
   }
 
-  // Batch into chunks to avoid exceeding PostgREST URL length limits
+  // Batch into chunks to avoid exceeding query limits
   const CHUNK_SIZE = 200;
   const valuesByItem: Record<string, Record<string, any>> = {};
 
   for (let i = 0; i < item_ids.length; i += CHUNK_SIZE) {
     const chunk = item_ids.slice(i, i + CHUNK_SIZE);
 
-    const { data, error } = await client
-      .from('collection_item_values')
-      .select('item_id, field_id, value, collection_fields!inner(type)')
-      .in('item_id', chunk)
-      .eq('is_published', is_published)
-      .is('deleted_at', null);
-
-    if (error) {
-      throw new Error(`Failed to fetch item values: ${error.message}`);
-    }
+    const data = await db('collection_item_values')
+      .select(
+        'collection_item_values.item_id',
+        'collection_item_values.field_id',
+        'collection_item_values.value',
+        'collection_fields.type as field_type'
+      )
+      .innerJoin('collection_fields', function () {
+        this.on('collection_item_values.field_id', 'collection_fields.id')
+          .andOn('collection_item_values.is_published', 'collection_fields.is_published');
+      })
+      .whereIn('collection_item_values.item_id', chunk)
+      .where('collection_item_values.is_published', is_published)
+      .whereNull('collection_item_values.deleted_at');
 
     data?.forEach((row: any) => {
       if (!valuesByItem[row.item_id]) {
         valuesByItem[row.item_id] = {};
       }
-      const fieldType = row.collection_fields?.type;
+      const fieldType = row.field_type;
       valuesByItem[row.item_id][row.field_id] = castValue(row.value, fieldType || 'text');
     });
   }
@@ -147,22 +134,13 @@ export async function getValuesByItemId(
   item_id: string,
   is_published: boolean = false
 ): Promise<CollectionItemValue[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('collection_item_values')
+  const data = await db('collection_item_values')
     .select('*')
-    .eq('item_id', item_id)
-    .eq('is_published', is_published)
-    .is('deleted_at', null);
-
-  if (error) {
-    throw new Error(`Failed to fetch item values: ${error.message}`);
-  }
+    .where('item_id', item_id)
+    .where('is_published', is_published)
+    .whereNull('deleted_at');
 
   return data || [];
 }
@@ -176,22 +154,13 @@ export async function getValuesByFieldId(
   field_id: string,
   is_published: boolean = false
 ): Promise<CollectionItemValue[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('collection_item_values')
+  const data = await db('collection_item_values')
     .select('*')
-    .eq('field_id', field_id)
-    .eq('is_published', is_published)
-    .is('deleted_at', null);
-
-  if (error) {
-    throw new Error(`Failed to fetch field values: ${error.message}`);
-  }
+    .where('field_id', field_id)
+    .where('is_published', is_published)
+    .whereNull('deleted_at');
 
   return data || [];
 }
@@ -207,26 +176,17 @@ export async function getValue(
   field_id: string,
   is_published: boolean = false
 ): Promise<CollectionItemValue | null> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('collection_item_values')
+  const data = await db('collection_item_values')
     .select('*')
-    .eq('item_id', item_id)
-    .eq('field_id', field_id)
-    .eq('is_published', is_published)
-    .is('deleted_at', null)
-    .single();
+    .where('item_id', item_id)
+    .where('field_id', field_id)
+    .where('is_published', is_published)
+    .whereNull('deleted_at')
+    .first();
 
-  if (error && error.code !== 'PGRST116') {
-    throw new Error(`Failed to fetch value: ${error.message}`);
-  }
-
-  return data;
+  return data || null;
 }
 
 /**
@@ -242,36 +202,25 @@ export async function setValue(
   value: string | null,
   is_published: boolean = false
 ): Promise<CollectionItemValue> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   // Check if value already exists for this specific version (draft or published)
   const existing = await getValue(item_id, field_id, is_published);
   if (existing) {
     // Update existing value
-    const { data, error } = await client
-      .from('collection_item_values')
+    const [data] = await db('collection_item_values')
+      .where('id', existing.id)
+      .where('is_published', is_published)
       .update({
         value,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', existing.id)
-      .eq('is_published', is_published)
-      .select()
-      .single();
-
-    if (error) {
-      throw new Error(`Failed to update value: ${error.message}`);
-    }
+      .returning('*');
 
     return data;
   } else {
     // Create new value
-    const { data, error } = await client
-      .from('collection_item_values')
+    const [data] = await db('collection_item_values')
       .insert({
         id: randomUUID(),
         item_id,
@@ -281,12 +230,7 @@ export async function setValue(
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .select()
-      .single();
-
-    if (error) {
-      throw new Error(`Failed to create value: ${error.message}`);
-    }
+      .returning('*');
 
     return data;
   }
@@ -331,11 +275,7 @@ export async function setValuesByFieldName(
   fieldType: Record<string, CollectionFieldType>,
   is_published: boolean = false
 ): Promise<CollectionItemValue[]> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   // Get current values to detect changes (only for draft updates)
   let currentValuesMap: Record<string, string | null> = {};
@@ -348,17 +288,11 @@ export async function setValuesByFieldName(
   }
 
   // Get field mappings to validate field IDs and get types
-  // Fields are fetched with the same is_published status as the values
-  const { data: fields, error } = await client
-    .from('collection_fields')
-    .select('id, type, key')
-    .eq('collection_id', collection_id)
-    .eq('is_published', is_published)
-    .is('deleted_at', null);
-
-  if (error) {
-    throw new Error(`Failed to fetch fields: ${error.message}`);
-  }
+  const fields = await db('collection_fields')
+    .select('id', 'type', 'key')
+    .where('collection_id', collection_id)
+    .where('is_published', is_published)
+    .whereNull('deleted_at');
 
   // Create mapping of field_id -> type and field_id -> key
   const fieldMap: Record<string, CollectionFieldType> = {};
@@ -433,26 +367,17 @@ export async function deleteValue(
   field_id: string,
   is_published: boolean = false
 ): Promise<void> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { error } = await client
-    .from('collection_item_values')
+  await db('collection_item_values')
+    .where('item_id', item_id)
+    .where('field_id', field_id)
+    .where('is_published', is_published)
+    .whereNull('deleted_at')
     .update({
       deleted_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-    })
-    .eq('item_id', item_id)
-    .eq('field_id', field_id)
-    .eq('is_published', is_published)
-    .is('deleted_at', null);
-
-  if (error) {
-    throw new Error(`Failed to delete value: ${error.message}`);
-  }
+    });
 }
 
 /**
@@ -463,11 +388,7 @@ export async function deleteValue(
  * @returns Number of values published
  */
 export async function publishValues(item_id: string): Promise<number> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   // Get all draft values for this item
   const draftValues = await getValuesByItemId(item_id, false);
@@ -489,15 +410,10 @@ export async function publishValues(item_id: string): Promise<number> {
   }));
 
   // Batch upsert all values
-  const { error } = await client
-    .from('collection_item_values')
-    .upsert(valuesToUpsert, {
-      onConflict: 'id,is_published', // Composite primary key
-    });
-
-  if (error) {
-    throw new Error(`Failed to publish values: ${error.message}`);
-  }
+  await db('collection_item_values')
+    .insert(valuesToUpsert)
+    .onConflict(['id', 'is_published'])
+    .merge();
 
   // Copy the draft content_hash to the published item
   const hash = generateCollectionItemContentHash(draftValues.map(v => ({ field_id: v.field_id, value: v.value })));

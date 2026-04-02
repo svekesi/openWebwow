@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import { revalidatePath } from 'next/cache';
 import { getKnexClient } from '@/lib/knex-client';
-import { getSupabaseAdmin } from '@/lib/supabase-server';
-import { STORAGE_BUCKET } from '@/lib/asset-constants';
+import { deleteFiles } from '@/lib/local-storage';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -18,9 +17,7 @@ export async function POST() {
     console.log('[POST /ycode/api/devtools/reset-db] Starting database reset...');
 
     const knex = await getKnexClient();
-    const supabase = await getSupabaseAdmin();
 
-    // Get all tables in the public schema
     const tables = await knex.raw(`
       SELECT tablename
       FROM pg_tables
@@ -29,29 +26,15 @@ export async function POST() {
 
     console.log('[POST /ycode/api/devtools/reset-db] Found ' + tables.rows.length + ' tables');
 
-    if (supabase) {
-      console.log('[POST /ycode/api/devtools/reset-db] Cleaning up assets storage bucket...');
-
-      try {
-        // emptyBucket removes all files recursively (including nested folders)
-        const { error: emptyError } = await supabase.storage.emptyBucket(STORAGE_BUCKET);
-
-        if (emptyError) {
-          console.log('[POST /ycode/api/devtools/reset-db] Error emptying bucket (may not exist):', emptyError.message);
-        } else {
-          console.log('[POST /ycode/api/devtools/reset-db] Assets bucket emptied');
-        }
-
-        const { error: deleteBucketError } = await supabase.storage.deleteBucket(STORAGE_BUCKET);
-
-        if (deleteBucketError) {
-          console.log('[POST /ycode/api/devtools/reset-db] Error deleting bucket (may not exist):', deleteBucketError.message);
-        } else {
-          console.log('[POST /ycode/api/devtools/reset-db] Assets bucket deleted');
-        }
-      } catch (storageError) {
-        console.log('[POST /ycode/api/devtools/reset-db] Storage cleanup error:', storageError);
+    try {
+      const assetRows = await knex('assets').select('storage_path').whereNotNull('storage_path');
+      const paths = assetRows.map((r: any) => r.storage_path).filter(Boolean);
+      if (paths.length > 0) {
+        await deleteFiles(paths);
+        console.log(`[POST /ycode/api/devtools/reset-db] Deleted ${paths.length} storage files`);
       }
+    } catch (storageError) {
+      console.log('[POST /ycode/api/devtools/reset-db] Storage cleanup error:', storageError);
     }
 
     await knex.raw(`

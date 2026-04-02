@@ -1,7 +1,7 @@
 /**
  * Asset Proxy Route
  *
- * Serves assets with SEO-friendly URLs by proxying from Supabase Storage.
+ * Serves assets with SEO-friendly URLs from local storage.
  * URL format: /a/{base62-hash}/{seo-friendly-name}.{ext}
  *
  * The hash is a base62-encoded UUID used for lookup.
@@ -12,16 +12,12 @@
  * Responses are cached with immutable headers so sharp only runs once per unique URL.
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import sharp from 'sharp';
 import { base62ToUuid } from '@/lib/convertion-utils';
 import { getAssetProxyUrl, isAssetOfType, ASSET_CATEGORIES } from '@/lib/asset-utils';
 import { getAssetForProxy } from '@/lib/repositories/assetRepository';
-import { getSupabaseAdmin } from '@/lib/supabase-server';
-import { STORAGE_BUCKET } from '@/lib/asset-constants';
-
-// Cache headers set at infrastructure level via next.config.ts headers()
-// to prevent Next.js proxy from overriding them
+import { readFile } from '@/lib/local-storage';
 
 function parseTransformParams(searchParams: URLSearchParams) {
   const width = parseInt(searchParams.get('width') || '');
@@ -69,27 +65,17 @@ export async function GET(
       }
     }
 
-    const supabase = await getSupabaseAdmin();
-    if (!supabase) {
-      return new Response('Service unavailable', { status: 503 });
-    }
-
-    const { data: urlData } = supabase.storage
-      .from(STORAGE_BUCKET)
-      .getPublicUrl(asset.storage_path);
-
-    const url = new URL(request.url);
-    const response = await fetch(urlData.publicUrl);
-    if (!response.ok) {
+    const fileBuffer = await readFile(asset.storage_path);
+    if (!fileBuffer) {
       return new Response('Not found', { status: 404 });
     }
 
+    const url = new URL(request.url);
     const transform = parseTransformParams(url.searchParams);
     const canResize = transform && isAssetOfType(asset.mime_type, ASSET_CATEGORIES.IMAGES);
 
     if (canResize) {
-      const buffer = Buffer.from(await response.arrayBuffer());
-      let pipeline = sharp(buffer);
+      let pipeline = sharp(fileBuffer);
 
       if (transform.width || transform.height) {
         pipeline = pipeline.resize(transform.width, transform.height, {
@@ -111,10 +97,11 @@ export async function GET(
       });
     }
 
-    return new Response(response.body, {
+    return new Response(new Uint8Array(fileBuffer), {
       status: 200,
       headers: {
         'Content-Type': asset.mime_type || 'application/octet-stream',
+        'Content-Length': fileBuffer.length.toString(),
       },
     });
   } catch {

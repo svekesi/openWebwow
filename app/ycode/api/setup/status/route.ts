@@ -1,28 +1,15 @@
-import { credentials } from '@/lib/credentials';
 import { noCache } from '@/lib/api-response';
-import { validateConnectionUrl } from '@/lib/supabase-config-parser';
-import { getSupabaseAdmin } from '@/lib/supabase-server';
-import type { SupabaseConfig } from '@/types';
+import { testKnexConnection } from '@/lib/knex-client';
 
-// Disable caching for this route
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 /**
- * Check if at least one auth user exists (setup fully complete)
+ * Check if database is connected and migrations have been run (setup complete)
  */
-async function hasAuthUsers(): Promise<boolean> {
+async function isDatabaseReady(): Promise<boolean> {
   try {
-    const client = await getSupabaseAdmin();
-    if (!client) return false;
-
-    const { data, error } = await client.auth.admin.listUsers({
-      page: 1,
-      perPage: 1,
-    });
-
-    if (error) return false;
-    return (data.users?.length ?? 0) > 0;
+    return await testKnexConnection();
   } catch {
     return false;
   }
@@ -31,46 +18,16 @@ async function hasAuthUsers(): Promise<boolean> {
 /**
  * GET /ycode/api/setup/status
  *
- * Check if Supabase is configured and detect environment.
- * Also returns is_setup_complete when config + migrations + admin user exist.
+ * Check if database is configured and ready.
  */
 export async function GET() {
   try {
-    const config = await credentials.get<SupabaseConfig>('supabase_config');
-    const isVercel = process.env.VERCEL === '1';
-
-    // If no config, return not configured
-    if (!config) {
-      return noCache({
-        is_configured: false,
-        is_setup_complete: false,
-        is_vercel: isVercel,
-      });
-    }
-
-    // Validate the connection URL format
-    try {
-      validateConnectionUrl(config.connectionUrl, config.dbPassword);
-    } catch (validationError) {
-      console.error('Invalid connection URL format:', validationError);
-
-      return noCache({
-        is_configured: false,
-        is_setup_complete: false,
-        is_vercel: isVercel,
-        error: validationError instanceof Error
-          ? validationError.message
-          : 'Invalid SUPABASE_CONNECTION_URL format. Expected: postgresql://postgres.[PROJECT-ID]:[YOUR-PASSWORD]@aws-x-xx-xxxx-x.pooler.supabase.com:6543/postgres',
-      });
-    }
-
-    // Check if setup is fully complete (has at least one auth user)
-    const setupComplete = await hasAuthUsers();
+    const isConfigured = !!process.env.DATABASE_URL;
+    const setupComplete = isConfigured ? await isDatabaseReady() : false;
 
     return noCache({
-      is_configured: true,
+      is_configured: isConfigured,
       is_setup_complete: setupComplete,
-      is_vercel: isVercel,
     });
   } catch (error) {
     console.error('Setup status check failed:', error);

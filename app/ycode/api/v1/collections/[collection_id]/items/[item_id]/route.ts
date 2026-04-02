@@ -4,7 +4,7 @@ import { getCollectionById } from '@/lib/repositories/collectionRepository';
 import { getFieldsByCollectionId } from '@/lib/repositories/collectionFieldRepository';
 import { getItemWithValues, deleteItem } from '@/lib/repositories/collectionItemRepository';
 import { setValues } from '@/lib/repositories/collectionItemValueRepository';
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getKnexClient } from '@/lib/knex-client';
 import { transformItemToPublicWithRefs, parseFieldProjections } from '../../../../reference-resolver';
 
 // Disable caching for this route
@@ -168,15 +168,11 @@ export async function PUT(
       valuesToSet[updatedAtField.id] = new Date().toISOString();
     }
 
-    // Update the item's updated_at timestamp for both draft and published
-    const client = await getSupabaseAdmin();
-    if (client) {
-      await client
-        .from('collection_items')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', item_id)
-        .in('is_published', [true, false]);
-    }
+    const db = await getKnexClient();
+    await db('collection_items')
+      .where('id', item_id)
+      .whereIn('is_published', [true, false])
+      .update({ updated_at: new Date().toISOString() });
 
     // Set the values for both published and draft
     await setValues(item_id, valuesToSet, true);
@@ -287,15 +283,11 @@ export async function PATCH(
       valuesToSet[updatedAtField.id] = new Date().toISOString();
     }
 
-    // Update the item's updated_at timestamp for both draft and published
-    const client = await getSupabaseAdmin();
-    if (client) {
-      await client
-        .from('collection_items')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', item_id)
-        .in('is_published', [true, false]);
-    }
+    const db = await getKnexClient();
+    await db('collection_items')
+      .where('id', item_id)
+      .whereIn('is_published', [true, false])
+      .update({ updated_at: new Date().toISOString() });
 
     // Set the values for both published and draft
     if (Object.keys(valuesToSet).length > 0) {

@@ -8,9 +8,9 @@
  */
 
 import { getKnexClient } from '../knex-client';
+import { jsonb } from '../knex-helpers';
 import { getPublishedPagesByIds } from '@/lib/repositories/pageRepository';
 import { batchPublishPageLayers } from '@/lib/repositories/pageLayersRepository';
-import { getSupabaseAdmin } from '@/lib/supabase-server';
 
 /**
  * Helper: Generate a unique slug from a page name
@@ -110,19 +110,14 @@ export async function fixOrphanedPageSlugs(
   if (orphanedPages.length === 0) return;
 
   const knex = await getKnexClient();
-  const { addTenantFilter, batchUpdateColumn } = await import('../knex-helpers');
+  const { batchUpdateColumn } = await import('../knex-helpers');
 
   try {
-    // Fetch all existing slugs once for duplicate checking
-    const slugQuery = knex('pages')
+    const slugRows: Array<{ slug: string }> = await knex('pages')
       .select('slug')
       .whereNotNull('slug')
       .whereNot('slug', '')
       .whereNull('deleted_at');
-
-    // Apply tenant scoping and execute query
-    // await resolves both the Promise and the thenable QueryBuilder, returning rows
-    const slugRows: Array<{ slug: string }> = await addTenantFilter(knex, slugQuery, 'pages');
     const existingSlugs = new Set(slugRows.map(r => r.slug));
 
     // Generate unique slugs for all orphaned pages
@@ -176,28 +171,18 @@ export async function publishPages(pageIds: string[]): Promise<PublishPagesResul
     return { count: 0, timing: { pagesDurationMs: 0, layersDurationMs: 0, layersCount: 0 } };
   }
 
-  // Import folder functions
   const {
     getAllDraftPageFolders,
     getPublishedPageFoldersByIds,
   } = await import('../repositories/pageFolderRepository');
 
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const db = await getKnexClient();
 
-  // Step 1: Batch fetch all draft pages in a single query
-  const { data: draftPagesData, error: pagesError } = await client
-    .from('pages')
+  const draftPagesData = await db('pages')
     .select('*')
-    .in('id', pageIds)
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (pagesError) {
-    throw new Error(`Failed to fetch draft pages: ${pagesError.message}`);
-  }
+    .whereIn('id', pageIds)
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   // Filter valid draft pages
   const validDraftPages = (draftPagesData || []).filter(
@@ -301,19 +286,17 @@ export async function publishPages(pageIds: string[]): Promise<PublishPagesResul
       page_folder_id: publishedParentId,
       order: draftFolder.order,
       depth: draftFolder.depth,
-      settings: draftFolder.settings,
+      settings: jsonb(draftFolder.settings),
       is_published: true,
       updated_at: new Date().toISOString(),
     });
   }
 
-  // Batch upsert folders
   if (foldersToUpsert.length > 0) {
-    await client
-      .from('page_folders')
-      .upsert(foldersToUpsert, {
-        onConflict: 'id,is_published',
-      });
+    await db('page_folders')
+      .insert(foldersToUpsert)
+      .onConflict(['id', 'is_published'])
+      .merge();
   }
 
   // Step 8: Publish pages using upsert (only pages that changed or are new)
@@ -353,7 +336,7 @@ export async function publishPages(pageIds: string[]): Promise<PublishPagesResul
         is_index: draftPage.is_index,
         is_dynamic: draftPage.is_dynamic,
         error_page: draftPage.error_page,
-        settings: draftPage.settings,
+        settings: jsonb(draftPage.settings),
         content_hash: draftPage.content_hash,
         is_published: true,
         updated_at: new Date().toISOString(),
@@ -380,13 +363,12 @@ export async function publishPages(pageIds: string[]): Promise<PublishPagesResul
     }
 
     const slugsToCheck = [...new Set(nonDynamicPagesToUpsert.map((p) => p.slug))];
-    const { data: conflictingPublished } = await client
-      .from('pages')
-      .select('id, slug, page_folder_id, error_page')
-      .eq('is_published', true)
-      .eq('is_dynamic', false)
-      .is('deleted_at', null)
-      .in('slug', slugsToCheck);
+    const conflictingPublished = await db('pages')
+      .select('id', 'slug', 'page_folder_id', 'error_page')
+      .where('is_published', true)
+      .where('is_dynamic', false)
+      .whereNull('deleted_at')
+      .whereIn('slug', slugsToCheck);
 
     // Delete if a different page will occupy this slug/folder/error_page slot
     const idsToDelete = (conflictingPublished || [])
@@ -403,44 +385,26 @@ export async function publishPages(pageIds: string[]): Promise<PublishPagesResul
         publishedPageIdsDeletedInStep8a.add(id);
       }
 
-      // Delete page_layers first (FK constraint)
-      const { error: layersDeleteError } = await client
-        .from('page_layers')
-        .delete()
-        .eq('is_published', true)
-        .in('page_id', idsToDelete);
+      await db('page_layers')
+        .where('is_published', true)
+        .whereIn('page_id', idsToDelete)
+        .delete();
 
-      if (layersDeleteError) {
-        throw new Error(`Failed to remove conflicting published page layers: ${layersDeleteError.message}`);
-      }
-
-      // Then delete the pages
-      const { error: deleteError } = await client
-        .from('pages')
-        .delete()
-        .eq('is_published', true)
-        .in('id', idsToDelete);
-
-      if (deleteError) {
-        throw new Error(`Failed to remove conflicting published pages: ${deleteError.message}`);
-      }
+      await db('pages')
+        .where('is_published', true)
+        .whereIn('id', idsToDelete)
+        .delete();
     }
   }
 
   // Time pages upsert
   const pagesStart = performance.now();
 
-  // Batch upsert pages
   if (pagesToUpsert.length > 0) {
-    const { error: upsertError } = await client
-      .from('pages')
-      .upsert(pagesToUpsert, {
-        onConflict: 'id,is_published',
-      });
-
-    if (upsertError) {
-      throw new Error(`Failed to upsert pages: ${upsertError.message}`);
-    }
+    await db('pages')
+      .insert(pagesToUpsert)
+      .onConflict(['id', 'is_published'])
+      .merge();
   }
 
   const pagesDurationMs = Math.round(performance.now() - pagesStart);

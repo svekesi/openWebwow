@@ -288,42 +288,38 @@ export async function POST(
     }
 
     // Now create the published version with the same ID
-    const { getSupabaseAdmin } = await import('@/lib/supabase-server');
+    const { getKnexClient } = await import('@/lib/knex-client');
     const { getValuesByItemId } = await import('@/lib/repositories/collectionItemValueRepository');
-    const client = await getSupabaseAdmin();
+    const db = await getKnexClient();
 
-    if (client) {
-      // Insert published item with same ID
-      await client
-        .from('collection_items')
-        .insert({
-          id: item.id,
-          collection_id,
-          manual_order: item.manual_order,
-          is_published: true,
-          is_publishable: true,
-          created_at: item.created_at,
-          updated_at: item.updated_at,
-        });
+    // Insert published item with same ID
+    await db('collection_items').insert({
+      id: item.id,
+      collection_id,
+      manual_order: item.manual_order,
+      is_published: true,
+      is_publishable: true,
+      created_at: item.created_at,
+      updated_at: item.updated_at,
+    });
 
-      // Copy draft values to published with SAME IDs (matching publishValues pattern)
-      if (Object.keys(valuesToSet).length > 0) {
-        const draftValues = await getValuesByItemId(item.id, false);
-        const now = new Date().toISOString();
-        
-        const publishedValues = draftValues.map(value => ({
-          id: value.id,  // Same ID as draft
-          item_id: value.item_id,
-          field_id: value.field_id,
-          value: value.value,
-          is_published: true,
-          created_at: value.created_at,
-          updated_at: now,
-        }));
+    // Copy draft values to published with SAME IDs (matching publishValues pattern)
+    if (Object.keys(valuesToSet).length > 0) {
+      const draftValues = await getValuesByItemId(item.id, false);
+      const now = new Date().toISOString();
 
-        await client
-          .from('collection_item_values')
-          .insert(publishedValues);
+      const publishedValues = draftValues.map(value => ({
+        id: value.id,
+        item_id: value.item_id,
+        field_id: value.field_id,
+        value: value.value,
+        is_published: true,
+        created_at: value.created_at,
+        updated_at: now,
+      }));
+
+      if (publishedValues.length > 0) {
+        await db('collection_item_values').insert(publishedValues);
       }
     }
 

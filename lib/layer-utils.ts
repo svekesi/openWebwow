@@ -1506,6 +1506,12 @@ export function getLayerHtmlTag(layer: Layer): string {
     return 'div';
   }
 
+  // Legacy/imported image layers may miss settings.tag.
+  // Ensure they render as valid HTML <img>, never <image>.
+  if (layer.name === 'image') {
+    return 'img';
+  }
+
   if (layer.settings?.tag) {
     return layer.settings.tag;
   }

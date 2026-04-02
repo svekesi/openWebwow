@@ -1,74 +1,47 @@
 /**
  * Auth Store
  *
- * Manages authentication state using Supabase Auth
+ * Manages authentication state using simple password-based auth.
  */
 
 import { create } from 'zustand';
-import { createBrowserClient } from '../lib/supabase-browser';
-import type { User, Session } from '@supabase/supabase-js';
 
 interface AuthState {
-  user: User | null;
-  session: Session | null;
+  authenticated: boolean;
   loading: boolean;
   initialized: boolean;
   error: string | null;
+  authEnabled: boolean;
 }
 
 interface AuthActions {
   initialize: () => Promise<void>;
-  signUp: (email: string, password: string) => Promise<{ error: string | null }>;
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  signIn: (password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
-  checkSession: () => Promise<void>;
   setError: (error: string | null) => void;
 }
 
 type AuthStore = AuthState & AuthActions;
 
 export const useAuthStore = create<AuthStore>((set, get) => ({
-  user: null,
-  session: null,
+  authenticated: false,
   loading: false,
   initialized: false,
   error: null,
+  authEnabled: true,
 
-  /**
-   * Initialize auth state and listen for auth changes
-   * Gracefully handles missing Supabase config (expected during setup)
-   */
   initialize: async () => {
     if (get().initialized) return;
 
     try {
-      const supabase = await createBrowserClient();
-
-      // If Supabase is not configured, skip initialization (expected during setup)
-      if (!supabase) {
-        set({
-          initialized: true,
-          error: null,
-        });
-        return;
-      }
-
-      // Validate session server-side (getUser verifies the JWT, unlike getSession)
-      const { data: { user } } = await supabase.auth.getUser();
-      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch('/ycode/api/auth/session');
+      const data = await response.json();
 
       set({
-        user: user ?? null,
-        session: user ? session : null,
+        authenticated: data.authenticated ?? false,
+        authEnabled: data.authEnabled ?? true,
         initialized: true,
-      });
-
-      // Listen for auth changes
-      supabase.auth.onAuthStateChange((_event, session) => {
-        set({
-          user: session?.user ?? null,
-          session,
-        });
+        error: null,
       });
     } catch (error) {
       console.error('Failed to initialize auth:', error);
@@ -79,124 +52,45 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     }
   },
 
-  /**
-   * Sign up a new user
-   */
-  signUp: async (email, password) => {
+  signIn: async (password) => {
     set({ loading: true, error: null });
 
     try {
-      const supabase = await createBrowserClient();
-
-      if (!supabase) {
-        set({ loading: false, error: 'Supabase not configured. Please complete setup first.' });
-        return { error: 'Supabase not configured. Please complete setup first.' };
-      }
-
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/ycode`,
-          // Note: Email confirmation should be disabled in Supabase Dashboard
-          // (Authentication → Providers → Email → Disable "Confirm email")
-          // This is recommended for self-hosted single-admin setups
-        },
+      const response = await fetch('/ycode/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
       });
 
-      if (error) {
-        set({ loading: false, error: error.message });
-        return { error: error.message };
-      }
+      const data = await response.json();
 
-      // Check if email confirmation is required
-      if (data.user && !data.session) {
-        const message = 'Email confirmation required. Please disable email confirmation in your Supabase project settings (Authentication → Providers → Email).';
+      if (!response.ok) {
+        const message = data.error || 'Login failed';
         set({ loading: false, error: message });
         return { error: message };
       }
 
       set({
-        user: data.user,
-        session: data.session,
+        authenticated: true,
         loading: false,
       });
 
       return { error: null };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Sign up failed';
+      const message = error instanceof Error ? error.message : 'Login failed';
       set({ loading: false, error: message });
       return { error: message };
     }
   },
 
-  /**
-   * Sign in existing user
-   */
-  signIn: async (email, password) => {
-    set({ loading: true, error: null });
-
-    try {
-      const supabase = await createBrowserClient();
-
-      if (!supabase) {
-        set({ loading: false, error: 'Supabase not configured. Please complete setup first.' });
-        return { error: 'Supabase not configured. Please complete setup first.' };
-      }
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (error) {
-        set({ loading: false, error: error.message });
-        return { error: error.message };
-      }
-
-      set({
-        user: data.user,
-        session: data.session,
-        loading: false,
-      });
-
-      return { error: null };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Sign in failed';
-      set({ loading: false, error: message });
-      return { error: message };
-    }
-  },
-
-  /**
-   * Sign out current user
-   */
   signOut: async () => {
     set({ loading: true, error: null });
 
     try {
-      const supabase = await createBrowserClient();
-
-      if (!supabase) {
-        // If Supabase is not configured, just clear local state
-        set({
-          user: null,
-          session: null,
-          loading: false,
-        });
-        return;
-      }
-
-      const { error } = await supabase.auth.signOut();
-
-      if (error) {
-        set({ loading: false, error: error.message });
-        return;
-      }
+      await fetch('/ycode/api/auth/logout', { method: 'POST' });
 
       set({
-        user: null,
-        session: null,
+        authenticated: false,
         loading: false,
       });
     } catch (error) {
@@ -205,31 +99,6 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     }
   },
 
-  /**
-   * Check current session
-   */
-  checkSession: async () => {
-    try {
-      const supabase = await createBrowserClient();
-
-      if (!supabase) {
-        return;
-      }
-
-      const { data: { session } } = await supabase.auth.getSession();
-
-      set({
-        user: session?.user ?? null,
-        session,
-      });
-    } catch (error) {
-      console.error('Failed to check session:', error);
-    }
-  },
-
-  /**
-   * Set error message
-   */
   setError: (error) => {
     set({ error });
   },

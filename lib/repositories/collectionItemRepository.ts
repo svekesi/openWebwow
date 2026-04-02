@@ -1,5 +1,6 @@
-import { getSupabaseAdmin } from '@/lib/supabase-server';
-import { SUPABASE_QUERY_LIMIT } from '@/lib/supabase-constants';
+import { getKnexClient } from '@/lib/knex-client';
+import { SUPABASE_QUERY_LIMIT } from '@/lib/db-constants';
+import type { Knex } from 'knex';
 import type { CollectionItem, CollectionItemWithValues } from '@/types';
 import { randomUUID } from 'crypto';
 import { getFieldsByCollectionId } from '@/lib/repositories/collectionFieldRepository';
@@ -13,7 +14,7 @@ import { findStatusFieldId, buildStatusValue } from '@/lib/collection-field-util
  *
  * Handles CRUD operations for collection items (EAV entities).
  * Items are the actual content entries in a collection.
- * Uses Supabase/PostgreSQL via admin client.
+ * Uses Knex/PostgreSQL query builder.
  *
  * NOTE: Uses composite primary key (id, is_published) architecture.
  * References parent collections using FK (collection_id).
@@ -39,50 +40,41 @@ export async function getTopItemsPerCollection(
   is_published: boolean = false,
   limit: number = 10
 ): Promise<CollectionItem[]> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   if (collectionIds.length === 0) {
     return [];
   }
 
-  // Use raw SQL with window function to get top N items per collection
-  const { data, error } = await client.rpc('get_top_items_per_collection', {
-    p_collection_ids: collectionIds,
-    p_is_published: is_published,
-    p_limit: limit,
-  });
-
-  if (error) {
+  // Try RPC function first
+  try {
+    const result = await db.raw(
+      `SELECT * FROM get_top_items_per_collection(ARRAY[${collectionIds.map(() => '?::uuid').join(',')}], ?::boolean, ?::integer)`,
+      [...collectionIds, is_published, limit]
+    );
+    return result.rows || [];
+  } catch {
     // Fallback to manual approach if RPC doesn't exist yet
-    let manualQuery = client
-      .from('collection_items')
+    let manualQuery = db('collection_items')
       .select('*')
-      .in('collection_id', collectionIds)
-      .eq('is_published', is_published)
-      .is('deleted_at', null)
-      .order('collection_id', { ascending: true })
-      .order('manual_order', { ascending: true })
-      .order('created_at', { ascending: false })
+      .whereIn('collection_id', collectionIds)
+      .where('is_published', is_published)
+      .whereNull('deleted_at')
+      .orderBy('collection_id', 'asc')
+      .orderBy('manual_order', 'asc')
+      .orderBy('created_at', 'desc')
       .limit(collectionIds.length * limit);
 
     // For published queries, only include publishable items
     if (is_published) {
-      manualQuery = manualQuery.eq('is_publishable', true);
+      manualQuery = manualQuery.where('is_publishable', true);
     }
 
-    const { data: manualData, error: manualError } = await manualQuery;
-
-    if (manualError) {
-      throw new Error(`Failed to fetch items: ${manualError.message}`);
-    }
+    const manualData = await manualQuery;
 
     // Group by collection and take first N per collection
     const itemsByCollection: Record<string, CollectionItem[]> = {};
-    manualData?.forEach(item => {
+    manualData?.forEach((item: any) => {
       if (!itemsByCollection[item.collection_id]) {
         itemsByCollection[item.collection_id] = [];
       }
@@ -93,8 +85,6 @@ export async function getTopItemsPerCollection(
 
     return Object.values(itemsByCollection).flat();
   }
-
-  return data || [];
 }
 
 export interface CreateCollectionItemData {
@@ -120,11 +110,7 @@ export async function getItemsByCollectionId(
   is_published: boolean = false,
   filters?: QueryFilters
 ): Promise<{ items: CollectionItem[], total: number }> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   // If itemIds filter is provided, use those directly (for multi-reference fields)
   // If no items are linked, return early
@@ -138,25 +124,18 @@ export async function getItemsByCollectionId(
     const searchTerm = `%${filters.search.trim()}%`;
 
     // Query collection_item_values for matching values (same published state)
-    const { data: matchingValues, error: searchError } = await client
-      .from('collection_item_values')
+    const matchingValues = await db('collection_item_values')
       .select('item_id')
-      .ilike('value', searchTerm)
-      .eq('is_published', is_published)
-      .is('deleted_at', null);
+      .where('value', 'ilike', searchTerm)
+      .where('is_published', is_published)
+      .whereNull('deleted_at');
 
-    if (searchError) {
-      throw new Error(`Failed to search items: ${searchError.message}`);
-    }
+    // Get unique item IDs
+    matchingItemIds = [...new Set(matchingValues.map((v: any) => v.item_id))];
 
-    if (matchingValues) {
-      // Get unique item IDs
-      matchingItemIds = [...new Set(matchingValues.map(v => v.item_id))];
-
-      // If no matches found, return early
-      if (matchingItemIds.length === 0) {
-        return { items: [], total: 0 };
-      }
+    // If no matches found, return early
+    if (matchingItemIds.length === 0) {
+      return { items: [], total: 0 };
     }
   }
 
@@ -177,87 +156,76 @@ export async function getItemsByCollectionId(
   }
 
   // Build base query for counting
-  let countQuery = client
-    .from('collection_items')
-    .select('*', { count: 'exact', head: true })
-    .eq('collection_id', collection_id)
-    .eq('is_published', is_published);
+  let countQuery = db('collection_items')
+    .where('collection_id', collection_id)
+    .where('is_published', is_published);
 
   // For published queries, only include publishable items
   if (is_published) {
-    countQuery = countQuery.eq('is_publishable', true);
+    countQuery = countQuery.where('is_publishable', true);
   }
 
   // Apply item ID filter to count query (from itemIds filter and/or search)
   if (filterIds !== null) {
-    countQuery = countQuery.in('id', filterIds);
+    countQuery = countQuery.whereIn('id', filterIds);
   }
 
   // Apply deleted filter to count query
   if (filters && 'deleted' in filters) {
     if (filters.deleted === false) {
-      countQuery = countQuery.is('deleted_at', null);
+      countQuery = countQuery.whereNull('deleted_at');
     } else if (filters.deleted === true) {
-      countQuery = countQuery.not('deleted_at', 'is', null);
+      countQuery = countQuery.whereNotNull('deleted_at');
     }
   } else {
-    countQuery = countQuery.is('deleted_at', null);
+    countQuery = countQuery.whereNull('deleted_at');
   }
 
   // Execute count query
-  const { count, error: countError } = await countQuery;
-
-  if (countError) {
-    throw new Error(`Failed to count collection items: ${countError.message}`);
-  }
+  const [{ count: rawCount }] = await countQuery.count('* as count');
+  const total = Number(rawCount);
 
   // Build query for fetching items
-  let query = client
-    .from('collection_items')
+  let query = db('collection_items')
     .select('*')
-    .eq('collection_id', collection_id)
-    .eq('is_published', is_published)
-    .order('manual_order', { ascending: true })
-    .order('created_at', { ascending: false });
+    .where('collection_id', collection_id)
+    .where('is_published', is_published)
+    .orderBy('manual_order', 'asc')
+    .orderBy('created_at', 'desc');
 
   // For published queries, only include publishable items
   if (is_published) {
-    query = query.eq('is_publishable', true);
+    query = query.where('is_publishable', true);
   }
 
   // Apply item ID filter (from itemIds filter and/or search)
   if (filterIds !== null) {
-    query = query.in('id', filterIds);
+    query = query.whereIn('id', filterIds);
   }
 
   // Apply filters - only filter deleted_at when explicitly specified
   if (filters && 'deleted' in filters) {
     if (filters.deleted === false) {
-      query = query.is('deleted_at', null);
+      query = query.whereNull('deleted_at');
     } else if (filters.deleted === true) {
-      query = query.not('deleted_at', 'is', null);
+      query = query.whereNotNull('deleted_at');
     }
     // If deleted is explicitly undefined, include all items (no filter)
   } else {
     // No filters provided: default to excluding deleted items
-    query = query.is('deleted_at', null);
+    query = query.whereNull('deleted_at');
   }
 
   // Apply pagination
-  if (filters?.limit !== undefined) {
+  if (filters?.offset !== undefined) {
+    query = query.offset(filters.offset).limit(filters.limit || 25);
+  } else if (filters?.limit !== undefined) {
     query = query.limit(filters.limit);
   }
-  if (filters?.offset !== undefined) {
-    query = query.range(filters.offset, filters.offset + (filters.limit || 25) - 1);
-  }
 
-  const { data, error } = await query;
+  const data = await query;
 
-  if (error) {
-    throw new Error(`Failed to fetch collection items: ${error.message}`);
-  }
-
-  return { items: data || [], total: count || 0 };
+  return { items: data || [], total };
 }
 
 /**
@@ -272,40 +240,35 @@ export async function enrichItemsWithStatus(
 ): Promise<void> {
   if (!statusFieldId || items.length === 0) return;
 
-  const client = await getSupabaseAdmin();
-  if (!client) throw new Error('Supabase client not configured');
+  const db = await getKnexClient();
 
   const itemIds = items.map(item => item.id);
 
   // Fetch published counterparts (id + content_hash) in one query
-  const { data: publishedRows, error } = await client
-    .from('collection_items')
-    .select('id, content_hash')
-    .in('id', itemIds)
-    .eq('is_published', true)
-    .is('deleted_at', null);
-
-  if (error) throw new Error(`Failed to fetch published items for status: ${error.message}`);
+  const publishedRows = await db('collection_items')
+    .select('id', 'content_hash')
+    .whereIn('id', itemIds)
+    .where('is_published', true)
+    .whereNull('deleted_at');
 
   const publishedHashMap = new Map<string, string | null>(
-    (publishedRows || []).map(row => [row.id, row.content_hash])
+    publishedRows.map((row: any) => [row.id, row.content_hash])
   );
 
   // Backfill published items that have null content_hash
-  const itemsMissingHash = (publishedRows || []).filter(row => row.content_hash == null);
+  const itemsMissingHash = publishedRows.filter((row: any) => row.content_hash == null);
   if (itemsMissingHash.length > 0) {
-    const backfillPromises = itemsMissingHash.map(async (row) => {
+    const backfillPromises = itemsMissingHash.map(async (row: any) => {
       const pubValues = await getValuesByItemId(row.id, true);
       if (pubValues.length === 0) return;
       const hash = generateCollectionItemContentHash(
         pubValues.map(v => ({ field_id: v.field_id, value: v.value }))
       );
       publishedHashMap.set(row.id, hash);
-      await client
-        .from('collection_items')
-        .update({ content_hash: hash })
-        .eq('id', row.id)
-        .eq('is_published', true);
+      await db('collection_items')
+        .where('id', row.id)
+        .where('is_published', true)
+        .update({ content_hash: hash });
     });
     await Promise.all(backfillPromises);
   }
@@ -344,43 +307,35 @@ export async function getAllItemsByCollectionId(
   is_published: boolean = false,
   includeDeleted: boolean = false
 ): Promise<CollectionItem[]> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   const allItems: CollectionItem[] = [];
   let offset = 0;
   let hasMore = true;
 
   while (hasMore) {
-    let query = client
-      .from('collection_items')
+    let query = db('collection_items')
       .select('*')
-      .eq('collection_id', collection_id)
-      .eq('is_published', is_published)
-      .order('manual_order', { ascending: true })
-      .order('created_at', { ascending: false })
-      .range(offset, offset + SUPABASE_QUERY_LIMIT - 1);
+      .where('collection_id', collection_id)
+      .where('is_published', is_published)
+      .orderBy('manual_order', 'asc')
+      .orderBy('created_at', 'desc')
+      .offset(offset)
+      .limit(SUPABASE_QUERY_LIMIT);
 
     // For published queries, only include publishable items
     if (is_published) {
-      query = query.eq('is_publishable', true);
+      query = query.where('is_publishable', true);
     }
 
     // Apply deleted filter
     if (includeDeleted) {
-      query = query.not('deleted_at', 'is', null);
+      query = query.whereNotNull('deleted_at');
     } else {
-      query = query.is('deleted_at', null);
+      query = query.whereNull('deleted_at');
     }
 
-    const { data, error } = await query;
-
-    if (error) {
-      throw new Error(`Failed to fetch collection items: ${error.message}`);
-    }
+    const data = await query;
 
     if (data && data.length > 0) {
       allItems.push(...data);
@@ -400,24 +355,15 @@ export async function getAllItemsByCollectionId(
  * @param isPublished - Get draft (false) or published (true) version. Defaults to false (draft).
  */
 export async function getItemById(id: string, isPublished: boolean = false): Promise<CollectionItem | null> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('collection_items')
+  const data = await db('collection_items')
     .select('*')
-    .eq('id', id)
-    .eq('is_published', isPublished)
-    .single();
+    .where('id', id)
+    .where('is_published', isPublished)
+    .first();
 
-  if (error && error.code !== 'PGRST116') {
-    throw new Error(`Failed to fetch collection item: ${error.message}`);
-  }
-
-  return data;
+  return data || null;
 }
 
 /**
@@ -431,22 +377,13 @@ export async function getItemsByIds(ids: string[], isPublished: boolean = false)
     return [];
   }
 
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('collection_items')
+  const data = await db('collection_items')
     .select('*')
-    .in('id', ids)
-    .eq('is_published', isPublished)
-    .is('deleted_at', null);
-
-  if (error) {
-    throw new Error(`Failed to fetch collection items: ${error.message}`);
-  }
+    .whereIn('id', ids)
+    .where('is_published', isPublished)
+    .whereNull('deleted_at');
 
   return data || [];
 }
@@ -458,40 +395,39 @@ export async function getItemsByIds(ids: string[], isPublished: boolean = false)
  * @param is_published - Get draft (false) or published (true) values. Defaults to false (draft).
  */
 export async function getItemWithValues(id: string, is_published: boolean = false): Promise<CollectionItemWithValues | null> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   // Get the item
   const item = await getItemById(id, is_published);
   if (!item) return null;
 
-  // Build query for values with field type info
-  let valuesQuery = client
-    .from('collection_item_values')
-    .select('value, field_id, collection_fields!inner(type)')
-    .eq('item_id', id)
-    .eq('is_published', is_published);
+  // Build query for values with field type info (replaces Supabase embedded resource)
+  let valuesQuery = db('collection_item_values')
+    .select(
+      'collection_item_values.value',
+      'collection_item_values.field_id',
+      'collection_fields.type as field_type'
+    )
+    .innerJoin('collection_fields', function () {
+      this.on('collection_item_values.field_id', 'collection_fields.id')
+        .andOn('collection_item_values.is_published', 'collection_fields.is_published');
+    })
+    .where('collection_item_values.item_id', id)
+    .where('collection_item_values.is_published', is_published);
 
   // If the item itself is deleted, include deleted values (to show name in UI)
   // Otherwise, exclude deleted values
   if (!item.deleted_at) {
-    valuesQuery = valuesQuery.is('deleted_at', null);
+    valuesQuery = valuesQuery.whereNull('collection_item_values.deleted_at');
   }
 
-  const { data: valuesData, error: valuesError } = await valuesQuery;
-
-  if (valuesError) {
-    throw new Error(`Failed to fetch item values: ${valuesError.message}`);
-  }
+  const valuesData = await valuesQuery;
 
   // Transform to { field_id: value } object, casting values by type
   const values: Record<string, any> = {};
   valuesData?.forEach((row: any) => {
     if (row.field_id) {
-      const fieldType = row.collection_fields?.type;
+      const fieldType = row.field_type;
       values[row.field_id] = castValue(row.value, fieldType || 'text');
     }
   });
@@ -514,46 +450,32 @@ export async function getItemIdsByFieldValue(
   targetValue: string,
   isPublished: boolean = false
 ): Promise<string[]> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   // Find item IDs where the field value matches (single reference = exact, multi_reference = contains)
-  // For single reference: value = targetValue (exact match)
-  // For multi_reference: value is a JSON string like '["uuid1","uuid2"]' containing targetValue
-  // We query for both patterns using OR with LIKE for JSON array containment
-  const { data, error } = await client
-    .from('collection_item_values')
+  const data = await db('collection_item_values')
     .select('item_id')
-    .eq('field_id', fieldId)
-    .eq('is_published', isPublished)
-    .is('deleted_at', null)
-    .or(`value.eq.${targetValue},value.like.%"${targetValue}"%`);
-
-  if (error) {
-    throw new Error(`Failed to query inverse references: ${error.message}`);
-  }
+    .where('field_id', fieldId)
+    .where('is_published', isPublished)
+    .whereNull('deleted_at')
+    .where(function () {
+      this.where('value', targetValue)
+        .orWhere('value', 'like', `%"${targetValue}"%`);
+    });
 
   if (!data || data.length === 0) return [];
 
   // Get unique item IDs that also belong to the target collection and are not deleted
-  const candidateIds = [...new Set(data.map(v => v.item_id))];
+  const candidateIds = [...new Set(data.map((v: any) => v.item_id))];
 
-  const { data: validItems, error: itemError } = await client
-    .from('collection_items')
+  const validItems = await db('collection_items')
     .select('id')
-    .eq('collection_id', collectionId)
-    .eq('is_published', isPublished)
-    .is('deleted_at', null)
-    .in('id', candidateIds);
+    .where('collection_id', collectionId)
+    .where('is_published', isPublished)
+    .whereNull('deleted_at')
+    .whereIn('id', candidateIds);
 
-  if (itemError) {
-    throw new Error(`Failed to validate inverse reference items: ${itemError.message}`);
-  }
-
-  return validItems?.map(i => i.id) || [];
+  return validItems?.map((i: any) => i.id) || [];
 }
 
 /**
@@ -650,11 +572,7 @@ export async function getMaxIdValue(
   collection_id: string,
   is_published: boolean = false
 ): Promise<number> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   // Get all fields for the collection
   const fields = await getFieldsByCollectionId(collection_id, is_published);
@@ -695,11 +613,7 @@ export async function getMaxIdValue(
 export async function createItemsBulk(
   items: Array<CreateCollectionItemData & { id?: string }>
 ): Promise<CollectionItem[]> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   if (items.length === 0) return [];
 
@@ -714,14 +628,9 @@ export async function createItemsBulk(
     updated_at: now,
   }));
 
-  const { data, error } = await client
-    .from('collection_items')
+  const data = await db('collection_items')
     .insert(itemsToInsert)
-    .select();
-
-  if (error) {
-    throw new Error(`Failed to bulk create items: ${error.message}`);
-  }
+    .returning('*');
 
   return data || [];
 }
@@ -730,17 +639,12 @@ export async function createItemsBulk(
  * Create a new item
  */
 export async function createItem(itemData: CreateCollectionItemData): Promise<CollectionItem> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   const id = randomUUID();
   const isPublished = itemData.is_published ?? false;
 
-  const { data, error } = await client
-    .from('collection_items')
+  const [data] = await db('collection_items')
     .insert({
       id,
       ...itemData,
@@ -750,12 +654,7 @@ export async function createItem(itemData: CreateCollectionItemData): Promise<Co
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to create collection item: ${error.message}`);
-  }
+    .returning('*');
 
   return data;
 }
@@ -771,27 +670,17 @@ export async function updateItem(
   itemData: UpdateCollectionItemData,
   isPublished: boolean = false
 ): Promise<CollectionItem> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('collection_items')
+  const [data] = await db('collection_items')
+    .where('id', id)
+    .where('is_published', isPublished)
+    .whereNull('deleted_at')
     .update({
       ...itemData,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', id)
-    .eq('is_published', isPublished)
-    .is('deleted_at', null)
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to update collection item: ${error.message}`);
-  }
+    .returning('*');
 
   return data;
 }
@@ -805,43 +694,29 @@ export async function updateItem(
  * @param isPublished - Which version to delete: draft (false) or published (true). Defaults to false (draft).
  */
 export async function deleteItem(id: string, isPublished: boolean = false): Promise<void> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   const now = new Date().toISOString();
 
   // Soft delete the collection item
-  const { error: itemError } = await client
-    .from('collection_items')
+  await db('collection_items')
+    .where('id', id)
+    .where('is_published', isPublished)
+    .whereNull('deleted_at')
     .update({
       deleted_at: now,
       updated_at: now,
-    })
-    .eq('id', id)
-    .eq('is_published', isPublished)
-    .is('deleted_at', null);
-
-  if (itemError) {
-    throw new Error(`Failed to delete collection item: ${itemError.message}`);
-  }
+    });
 
   // Soft delete all collection_item_values for this item (same published state)
-  const { error: valuesError } = await client
-    .from('collection_item_values')
+  await db('collection_item_values')
+    .where('item_id', id)
+    .where('is_published', isPublished)
+    .whereNull('deleted_at')
     .update({
       deleted_at: now,
       updated_at: now,
-    })
-    .eq('item_id', id)
-    .eq('is_published', isPublished)
-    .is('deleted_at', null);
-
-  if (valuesError) {
-    throw new Error(`Failed to delete collection item values: ${valuesError.message}`);
-  }
+    });
 }
 
 /**
@@ -852,21 +727,12 @@ export async function deleteItem(id: string, isPublished: boolean = false): Prom
  * @param isPublished - Which version to delete: draft (false) or published (true). Defaults to false (draft).
  */
 export async function hardDeleteItem(id: string, isPublished: boolean = false): Promise<void> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { error } = await client
-    .from('collection_items')
-    .delete()
-    .eq('id', id)
-    .eq('is_published', isPublished);
-
-  if (error) {
-    throw new Error(`Failed to hard delete collection item: ${error.message}`);
-  }
+  await db('collection_items')
+    .where('id', id)
+    .where('is_published', isPublished)
+    .delete();
 }
 
 /**
@@ -876,11 +742,7 @@ export async function hardDeleteItem(id: string, isPublished: boolean = false): 
  * @param isPublished - Whether to duplicate draft (false) or published (true) version. Defaults to false (draft).
  */
 export async function duplicateItem(itemId: string, isPublished: boolean = false): Promise<CollectionItemWithValues> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   // Get the original item with its values
   const originalItem = await getItemWithValues(itemId, isPublished);
@@ -952,8 +814,7 @@ export async function duplicateItem(itemId: string, isPublished: boolean = false
 
   // Create the new item with a new UUID
   const newId = randomUUID();
-  const { data: newItem, error: itemError } = await client
-    .from('collection_items')
+  const [newItem] = await db('collection_items')
     .insert({
       id: newId,
       collection_id: originalItem.collection_id,
@@ -963,12 +824,7 @@ export async function duplicateItem(itemId: string, isPublished: boolean = false
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
-    .select()
-    .single();
-
-  if (itemError) {
-    throw new Error(`Failed to create duplicate item: ${itemError.message}`);
-  }
+    .returning('*');
 
   // Create set of valid field IDs (fields already fetched above)
   const validFieldIds = new Set(fields.map(f => f.id));
@@ -987,13 +843,10 @@ export async function duplicateItem(itemId: string, isPublished: boolean = false
     }));
 
   if (valuesToInsert.length > 0) {
-    const { error: valuesError } = await client
-      .from('collection_item_values')
-      .insert(valuesToInsert);
-
-    if (valuesError) {
-      // If values insertion fails, we should still return the item
-      // but log the error
+    try {
+      await db('collection_item_values')
+        .insert(valuesToInsert);
+    } catch (valuesError) {
       console.error('Failed to duplicate values:', valuesError);
     }
   }
@@ -1016,14 +869,10 @@ export async function searchItems(
   is_published: boolean = false,
   query: string
 ): Promise<{ items: CollectionItemWithValues[], total: number }> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   // Get all items for this collection
-  const { items, total } = await getItemsByCollectionId(collection_id, is_published);
+  const { items } = await getItemsByCollectionId(collection_id, is_published);
   if (!query || query.trim() === '') {
     // Return all items with values if no query
     return getItemsWithValues(collection_id, is_published, undefined);
@@ -1032,19 +881,14 @@ export async function searchItems(
   // Search in item values
   const searchTerm = `%${query.toLowerCase()}%`;
 
-  const { data: matchingValues, error } = await client
-    .from('collection_item_values')
+  const matchingValues = await db('collection_item_values')
     .select('item_id')
-    .ilike('value', searchTerm)
-    .eq('is_published', is_published)
-    .is('deleted_at', null);
-
-  if (error) {
-    throw new Error(`Failed to search items: ${error.message}`);
-  }
+    .where('value', 'ilike', searchTerm)
+    .where('is_published', is_published)
+    .whereNull('deleted_at');
 
   // Get unique item IDs
-  const itemIds = [...new Set(matchingValues?.map(v => v.item_id) || [])];
+  const itemIds = [...new Set(matchingValues?.map((v: any) => v.item_id) || [])];
 
   // Filter items and get with values
   const filteredItems = items.filter(item => itemIds.includes(item.id));
@@ -1063,11 +907,7 @@ export async function searchItems(
  * @param id - Item UUID
  */
 export async function publishItem(id: string): Promise<CollectionItem> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   // Get the draft version
   const draft = await getItemById(id, false);
@@ -1076,27 +916,21 @@ export async function publishItem(id: string): Promise<CollectionItem> {
   }
 
   // Upsert published version (composite key handles insert/update automatically)
-  const { data, error } = await client
-    .from('collection_items')
-    .upsert({
-      id: draft.id, // Same UUID
+  const [data] = await db('collection_items')
+    .insert({
+      id: draft.id,
       collection_id: draft.collection_id,
       manual_order: draft.manual_order,
       is_publishable: draft.is_publishable,
       is_published: true,
       created_at: draft.created_at,
       updated_at: new Date().toISOString(),
-    }, {
-      onConflict: 'id,is_published', // Composite primary key
-    }).select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to publish item: ${error.message}`);
-  }
+    })
+    .onConflict(['id', 'is_published'])
+    .merge()
+    .returning('*');
 
   return data;
-
 }
 
 /**
@@ -1104,49 +938,34 @@ export async function publishItem(id: string): Promise<CollectionItem> {
  * Checks both metadata (manual_order) and value changes.
  */
 export async function getTotalPublishableItemsCount(): Promise<number> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data: collections, error: collectionsError } = await client
-    .from('collections')
+  const collections = await db('collections')
     .select('id')
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (collectionsError) {
-    throw new Error(`Failed to fetch collections: ${collectionsError.message}`);
-  }
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   if (!collections || collections.length === 0) {
     return 0;
   }
 
-  const collectionIds = collections.map(c => c.id);
+  const collectionIds = collections.map((c: any) => c.id);
 
-  const [draftResult, publishedResult] = await Promise.all([
-    client
-      .from('collection_items')
-      .select('id, manual_order')
-      .in('collection_id', collectionIds)
-      .eq('is_published', false)
-      .eq('is_publishable', true)
-      .is('deleted_at', null),
-    client
-      .from('collection_items')
-      .select('id, manual_order')
-      .in('collection_id', collectionIds)
-      .eq('is_published', true),
+  const [draftItems, publishedItems] = await Promise.all([
+    db('collection_items')
+      .select('id', 'manual_order')
+      .whereIn('collection_id', collectionIds)
+      .where('is_published', false)
+      .where('is_publishable', true)
+      .whereNull('deleted_at'),
+    db('collection_items')
+      .select('id', 'manual_order')
+      .whereIn('collection_id', collectionIds)
+      .where('is_published', true),
   ]);
 
-  if (draftResult.error) {
-    throw new Error(`Failed to fetch draft items: ${draftResult.error.message}`);
-  }
-
   const publishedMap = new Map<string, number>();
-  for (const pub of publishedResult.data || []) {
+  for (const pub of publishedItems) {
     publishedMap.set(pub.id, pub.manual_order);
   }
 
@@ -1154,7 +973,7 @@ export async function getTotalPublishableItemsCount(): Promise<number> {
   let count = 0;
   const matchingOrderItemIds: string[] = [];
 
-  for (const draft of draftResult.data || []) {
+  for (const draft of draftItems) {
     const pubOrder = publishedMap.get(draft.id);
     if (pubOrder === undefined || draft.manual_order !== pubOrder) {
       count++;
@@ -1165,7 +984,7 @@ export async function getTotalPublishableItemsCount(): Promise<number> {
 
   // For items with matching metadata, check value changes in batches
   if (matchingOrderItemIds.length > 0) {
-    count += await countItemsWithValueChanges(client, matchingOrderItemIds);
+    count += await countItemsWithValueChanges(db, matchingOrderItemIds);
   }
 
   return count;
@@ -1173,10 +992,10 @@ export async function getTotalPublishableItemsCount(): Promise<number> {
 
 /**
  * Count items that have value-level changes between draft and published.
- * Processes in batches to stay within Supabase query limits.
+ * Processes in batches to stay within query limits.
  */
 async function countItemsWithValueChanges(
-  client: Exclude<Awaited<ReturnType<typeof getSupabaseAdmin>>, null>,
+  db: Knex,
   itemIds: string[]
 ): Promise<number> {
   const BATCH_SIZE = 50;
@@ -1185,66 +1004,64 @@ async function countItemsWithValueChanges(
   for (let i = 0; i < itemIds.length; i += BATCH_SIZE) {
     const batchIds = itemIds.slice(i, i + BATCH_SIZE);
 
-    const [draftValsResult, pubValsResult] = await Promise.all([
-      client
-        .from('collection_item_values')
-        .select('item_id, field_id, value')
-        .in('item_id', batchIds)
-        .eq('is_published', false)
-        .is('deleted_at', null)
-        .limit(SUPABASE_QUERY_LIMIT),
-      client
-        .from('collection_item_values')
-        .select('item_id, field_id, value')
-        .in('item_id', batchIds)
-        .eq('is_published', true)
-        .is('deleted_at', null)
-        .limit(SUPABASE_QUERY_LIMIT),
-    ]);
+    try {
+      const [draftVals, pubVals] = await Promise.all([
+        db('collection_item_values')
+          .select('item_id', 'field_id', 'value')
+          .whereIn('item_id', batchIds)
+          .where('is_published', false)
+          .whereNull('deleted_at')
+          .limit(SUPABASE_QUERY_LIMIT),
+        db('collection_item_values')
+          .select('item_id', 'field_id', 'value')
+          .whereIn('item_id', batchIds)
+          .where('is_published', true)
+          .whereNull('deleted_at')
+          .limit(SUPABASE_QUERY_LIMIT),
+      ]);
 
-    if (draftValsResult.error || pubValsResult.error) {
-      continue; // Skip batch on error, don't break the count
-    }
-
-    // Build published values lookup: item_id -> (field_id -> value)
-    const pubValsByItem = new Map<string, Map<string, string | null>>();
-    for (const v of pubValsResult.data || []) {
-      if (!pubValsByItem.has(v.item_id)) {
-        pubValsByItem.set(v.item_id, new Map());
-      }
-      pubValsByItem.get(v.item_id)!.set(v.field_id, v.value);
-    }
-
-    // Build draft values grouped by item_id
-    const draftValsByItem = new Map<string, Map<string, string | null>>();
-    for (const v of draftValsResult.data || []) {
-      if (!draftValsByItem.has(v.item_id)) {
-        draftValsByItem.set(v.item_id, new Map());
-      }
-      draftValsByItem.get(v.item_id)!.set(v.field_id, v.value);
-    }
-
-    // Compare each item's values
-    for (const itemId of batchIds) {
-      const draftVals = draftValsByItem.get(itemId) || new Map();
-      const pubVals = pubValsByItem.get(itemId) || new Map();
-
-      if (draftVals.size !== pubVals.size) {
-        changedCount++;
-        continue;
+      // Build published values lookup: item_id -> (field_id -> value)
+      const pubValsByItem = new Map<string, Map<string, string | null>>();
+      for (const v of pubVals) {
+        if (!pubValsByItem.has(v.item_id)) {
+          pubValsByItem.set(v.item_id, new Map());
+        }
+        pubValsByItem.get(v.item_id)!.set(v.field_id, v.value);
       }
 
-      let hasChange = false;
-      for (const [fieldId, draftValue] of draftVals) {
-        if (!pubVals.has(fieldId) || draftValue !== pubVals.get(fieldId)) {
-          hasChange = true;
-          break;
+      // Build draft values grouped by item_id
+      const draftValsByItem = new Map<string, Map<string, string | null>>();
+      for (const v of draftVals) {
+        if (!draftValsByItem.has(v.item_id)) {
+          draftValsByItem.set(v.item_id, new Map());
+        }
+        draftValsByItem.get(v.item_id)!.set(v.field_id, v.value);
+      }
+
+      // Compare each item's values
+      for (const itemId of batchIds) {
+        const itemDraftVals = draftValsByItem.get(itemId) || new Map();
+        const itemPubVals = pubValsByItem.get(itemId) || new Map();
+
+        if (itemDraftVals.size !== itemPubVals.size) {
+          changedCount++;
+          continue;
+        }
+
+        let hasChange = false;
+        for (const [fieldId, draftValue] of itemDraftVals) {
+          if (!itemPubVals.has(fieldId) || draftValue !== itemPubVals.get(fieldId)) {
+            hasChange = true;
+            break;
+          }
+        }
+
+        if (hasChange) {
+          changedCount++;
         }
       }
-
-      if (hasChange) {
-        changedCount++;
-      }
+    } catch {
+      continue; // Skip batch on error, don't break the count
     }
   }
 
@@ -1256,22 +1073,19 @@ async function countItemsWithValueChanges(
  * Also sets is_publishable = false on the draft row.
  */
 export async function unpublishSingleItem(itemId: string): Promise<void> {
-  const client = await getSupabaseAdmin();
-  if (!client) throw new Error('Supabase client not configured');
+  const db = await getKnexClient();
 
   // Delete published row (CASCADE deletes published values)
-  await client
-    .from('collection_items')
-    .delete()
-    .eq('id', itemId)
-    .eq('is_published', true);
+  await db('collection_items')
+    .where('id', itemId)
+    .where('is_published', true)
+    .delete();
 
   // Set draft as not publishable
-  await client
-    .from('collection_items')
-    .update({ is_publishable: false, updated_at: new Date().toISOString() })
-    .eq('id', itemId)
-    .eq('is_published', false);
+  await db('collection_items')
+    .where('id', itemId)
+    .where('is_published', false)
+    .update({ is_publishable: false, updated_at: new Date().toISOString() });
 }
 
 /**
@@ -1280,34 +1094,30 @@ export async function unpublishSingleItem(itemId: string): Promise<void> {
  * @returns true if a published version was removed (caller should clear cache)
  */
 export async function stageSingleItem(itemId: string): Promise<boolean> {
-  const client = await getSupabaseAdmin();
-  if (!client) throw new Error('Supabase client not configured');
+  const db = await getKnexClient();
 
   // Check if a published version exists
-  const { data: published } = await client
-    .from('collection_items')
+  const published = await db('collection_items')
     .select('id')
-    .eq('id', itemId)
-    .eq('is_published', true)
-    .maybeSingle();
+    .where('id', itemId)
+    .where('is_published', true)
+    .first();
 
   const hadPublished = !!published;
 
   // Remove published version if it exists (CASCADE deletes published values)
   if (hadPublished) {
-    await client
-      .from('collection_items')
-      .delete()
-      .eq('id', itemId)
-      .eq('is_published', true);
+    await db('collection_items')
+      .where('id', itemId)
+      .where('is_published', true)
+      .delete();
   }
 
   // Set draft as publishable
-  await client
-    .from('collection_items')
-    .update({ is_publishable: true, updated_at: new Date().toISOString() })
-    .eq('id', itemId)
-    .eq('is_published', false);
+  await db('collection_items')
+    .where('id', itemId)
+    .where('is_published', false)
+    .update({ is_publishable: true, updated_at: new Date().toISOString() });
 
   return hadPublished;
 }
@@ -1317,19 +1127,17 @@ export async function stageSingleItem(itemId: string): Promise<boolean> {
  * and copies draft values to published. Sets is_publishable = true.
  */
 export async function publishSingleItem(itemId: string): Promise<void> {
-  const client = await getSupabaseAdmin();
-  if (!client) throw new Error('Supabase client not configured');
+  const db = await getKnexClient();
 
   // Get draft item
-  const { data: draftItem, error: draftErr } = await client
-    .from('collection_items')
+  const draftItem = await db('collection_items')
     .select('*')
-    .eq('id', itemId)
-    .eq('is_published', false)
-    .is('deleted_at', null)
-    .single();
+    .where('id', itemId)
+    .where('is_published', false)
+    .whereNull('deleted_at')
+    .first();
 
-  if (draftErr || !draftItem) {
+  if (!draftItem) {
     throw new Error('Draft item not found');
   }
 
@@ -1337,11 +1145,10 @@ export async function publishSingleItem(itemId: string): Promise<void> {
 
   // Ensure draft is marked publishable
   if (!draftItem.is_publishable) {
-    await client
-      .from('collection_items')
-      .update({ is_publishable: true, updated_at: now })
-      .eq('id', itemId)
-      .eq('is_published', false);
+    await db('collection_items')
+      .where('id', itemId)
+      .where('is_published', false)
+      .update({ is_publishable: true, updated_at: now });
   }
 
   // Ensure published fields exist (values FK requires them)
@@ -1364,15 +1171,15 @@ export async function publishSingleItem(itemId: string): Promise<void> {
       created_at: f.created_at,
       updated_at: now,
     }));
-    await client
-      .from('collection_fields')
-      .upsert(fieldsToUpsert, { onConflict: 'id,is_published' });
+    await db('collection_fields')
+      .insert(fieldsToUpsert)
+      .onConflict(['id', 'is_published'])
+      .merge();
   }
 
   // Upsert published item row
-  await client
-    .from('collection_items')
-    .upsert({
+  await db('collection_items')
+    .insert({
       id: draftItem.id,
       collection_id: draftItem.collection_id,
       manual_order: draftItem.manual_order,
@@ -1381,7 +1188,9 @@ export async function publishSingleItem(itemId: string): Promise<void> {
       content_hash: draftItem.content_hash,
       created_at: draftItem.created_at,
       updated_at: now,
-    }, { onConflict: 'id,is_published' });
+    })
+    .onConflict(['id', 'is_published'])
+    .merge();
 
   // Copy draft values to published via existing publishValues utility
   const { publishValues } = await import('@/lib/repositories/collectionItemValueRepository');

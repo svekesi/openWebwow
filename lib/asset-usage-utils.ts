@@ -4,8 +4,8 @@
  * Functions to find and count asset usage across pages, components, and CMS items
  */
 
-import { getSupabaseAdmin } from '@/lib/supabase-server';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { getKnexClient } from '@/lib/knex-client';
+import type { Knex } from 'knex';
 import type { Layer } from '@/types';
 import { ASSET_FIELD_TYPES, findDisplayField } from './collection-field-utils';
 
@@ -158,21 +158,16 @@ function fieldDefaultReferencesAsset(defaultVal: string, assetId: string, parsed
 
 /** Fetch collection names by IDs and return a lookup map */
 async function fetchCollectionNames(
-  client: SupabaseClient,
+  db: Knex,
   collectionIds: string[]
 ): Promise<Record<string, string>> {
   if (collectionIds.length === 0) return {};
 
-  const { data, error } = await client
-    .from('collections')
-    .select('id, name')
-    .in('id', collectionIds)
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (error) {
-    throw new Error(`Failed to fetch collections: ${error.message}`);
-  }
+  const data = await db('collections')
+    .select('id', 'name')
+    .whereIn('id', collectionIds)
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   const map: Record<string, string> = {};
   (data || []).forEach((c: any) => {
@@ -190,20 +185,16 @@ interface AssetFieldDefault {
 
 /** Fetch asset-type collection fields that have a non-null default value */
 async function fetchAssetFieldsWithDefaults(
-  client: SupabaseClient,
-  selectColumns: string = 'id, name, collection_id, default'
+  db: Knex,
+  selectColumns: string[] = ['id', 'name', 'collection_id', 'default']
 ): Promise<AssetFieldDefault[]> {
-  const { data, error } = await client
-    .from('collection_fields')
+  const data = await db('collection_fields')
     .select(selectColumns)
-    .in('type', ASSET_FIELD_TYPES)
-    .eq('is_published', false)
-    .is('deleted_at', null)
-    .not('default', 'is', null);
+    .whereIn('type', ASSET_FIELD_TYPES)
+    .where('is_published', false)
+    .whereNull('deleted_at')
+    .whereNotNull('default');
 
-  if (error) {
-    throw new Error(`Failed to fetch field defaults: ${error.message}`);
-  }
   return (data || []) as unknown as AssetFieldDefault[];
 }
 
@@ -211,11 +202,7 @@ async function fetchAssetFieldsWithDefaults(
  * Get asset usage with names across pages, components, and CMS items
  */
 export async function getAssetUsage(assetId: string): Promise<AssetUsageResult> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const db = await getKnexClient();
 
   const pageEntries: AssetUsageEntry[] = [];
   const componentEntries: AssetUsageEntry[] = [];
@@ -224,16 +211,10 @@ export async function getAssetUsage(assetId: string): Promise<AssetUsageResult> 
   // Track unique page IDs that use this asset
   const pageIdsWithAsset = new Set<string>();
 
-  // Check page layers (draft versions)
-  const { data: pageLayersRecords, error: pageLayersError } = await client
-    .from('page_layers')
-    .select('id, page_id, layers')
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (pageLayersError) {
-    throw new Error(`Failed to fetch page layers: ${pageLayersError.message}`);
-  }
+  const pageLayersRecords = await db('page_layers')
+    .select('id', 'page_id', 'layers')
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   for (const record of pageLayersRecords || []) {
     if (record.layers && layersContainAsset(record.layers, assetId)) {
@@ -241,16 +222,10 @@ export async function getAssetUsage(assetId: string): Promise<AssetUsageResult> 
     }
   }
 
-  // Check page settings for SEO images
-  const { data: pagesData, error: pagesError } = await client
-    .from('pages')
-    .select('id, name, settings')
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (pagesError) {
-    throw new Error(`Failed to fetch pages: ${pagesError.message}`);
-  }
+  const pagesData = await db('pages')
+    .select('id', 'name', 'settings')
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   for (const page of pagesData || []) {
     if (page.settings && pageSettingsContainAsset(page.settings, assetId)) {
@@ -266,16 +241,10 @@ export async function getAssetUsage(assetId: string): Promise<AssetUsageResult> 
     pageEntries.push({ id: pageId, name: page?.name ?? 'Unknown Page' });
   }
 
-  // Check components (draft versions)
-  const { data: components, error: componentsError } = await client
-    .from('components')
-    .select('id, name, layers')
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (componentsError) {
-    throw new Error(`Failed to fetch components: ${componentsError.message}`);
-  }
+  const components = await db('components')
+    .select('id', 'name', 'layers')
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   for (const component of components || []) {
     if (component.layers && layersContainAsset(component.layers, assetId)) {
@@ -283,62 +252,38 @@ export async function getAssetUsage(assetId: string): Promise<AssetUsageResult> 
     }
   }
 
-  // Check CMS collection item values (image/file fields)
-  const { data: imageFields, error: fieldsError } = await client
-    .from('collection_fields')
-    .select('id, collection_id')
-    .in('type', ['image', 'file'])
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (fieldsError) {
-    throw new Error(`Failed to fetch collection fields: ${fieldsError.message}`);
-  }
+  const imageFields = await db('collection_fields')
+    .select('id', 'collection_id')
+    .whereIn('type', ['image', 'file'])
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   if (imageFields && imageFields.length > 0) {
     const fieldIds = imageFields.map((f) => f.id);
 
-    const { data: itemValues, error: valuesError } = await client
-      .from('collection_item_values')
+    const itemValues = await db('collection_item_values')
       .select('item_id')
-      .in('field_id', fieldIds)
-      .eq('value', assetId)
-      .eq('is_published', false)
-      .is('deleted_at', null);
-
-    if (valuesError) {
-      throw new Error(`Failed to fetch item values: ${valuesError.message}`);
-    }
+      .whereIn('field_id', fieldIds)
+      .where('value', assetId)
+      .where('is_published', false)
+      .whereNull('deleted_at');
 
     const uniqueItemIds = [...new Set(itemValues?.map((v) => v.item_id) || [])];
     if (uniqueItemIds.length > 0) {
-      // Get items with collection_id
-      const { data: items, error: itemsError } = await client
-        .from('collection_items')
-        .select('id, collection_id')
-        .in('id', uniqueItemIds)
-        .eq('is_published', false)
-        .is('deleted_at', null);
-
-      if (itemsError) {
-        throw new Error(`Failed to fetch collection items: ${itemsError.message}`);
-      }
+      const items = await db('collection_items')
+        .select('id', 'collection_id')
+        .whereIn('id', uniqueItemIds)
+        .where('is_published', false)
+        .whereNull('deleted_at');
 
       const cmsCollectionIds = [...new Set((items || []).map((i) => i.collection_id))];
 
-      // Get fields for display name (key=name, title, or first text field)
-      const { data: allFields, error: allFieldsError } = await client
-        .from('collection_fields')
-        .select('id, key, type, fillable, collection_id')
-        .in('collection_id', cmsCollectionIds)
-        .eq('is_published', false)
-        .is('deleted_at', null);
+      const allFields = await db('collection_fields')
+        .select('id', 'key', 'type', 'fillable', 'collection_id')
+        .whereIn('collection_id', cmsCollectionIds)
+        .where('is_published', false)
+        .whereNull('deleted_at');
 
-      if (allFieldsError) {
-        throw new Error(`Failed to fetch collection fields: ${allFieldsError.message}`);
-      }
-
-      // Find display field per collection
       const displayFieldByCollection: Record<string, { id: string }> = {};
       for (const collectionId of cmsCollectionIds) {
         const fields = (allFields || []).filter((f) => f.collection_id === collectionId);
@@ -348,19 +293,13 @@ export async function getAssetUsage(assetId: string): Promise<AssetUsageResult> 
         }
       }
 
-      // Get values for display fields
       const displayFieldIds = Object.values(displayFieldByCollection).map((f) => f.id);
-      const { data: displayValues, error: displayValuesError } = await client
-        .from('collection_item_values')
-        .select('item_id, field_id, value')
-        .in('item_id', uniqueItemIds)
-        .in('field_id', displayFieldIds)
-        .eq('is_published', false)
-        .is('deleted_at', null);
-
-      if (displayValuesError) {
-        throw new Error(`Failed to fetch display values: ${displayValuesError.message}`);
-      }
+      const displayValues = await db('collection_item_values')
+        .select('item_id', 'field_id', 'value')
+        .whereIn('item_id', uniqueItemIds)
+        .whereIn('field_id', displayFieldIds)
+        .where('is_published', false)
+        .whereNull('deleted_at');
 
       const valueByItem: Record<string, string> = {};
       displayValues?.forEach((row: any) => {
@@ -380,7 +319,7 @@ export async function getAssetUsage(assetId: string): Promise<AssetUsageResult> 
 
   // Check collection field defaults that reference this asset
   const fieldDefaultEntries: FieldDefaultUsageEntry[] = [];
-  const assetFieldsWithDefaults = await fetchAssetFieldsWithDefaults(client);
+  const assetFieldsWithDefaults = await fetchAssetFieldsWithDefaults(db);
 
   for (const field of assetFieldsWithDefaults) {
     const defaultVal = field.default as string;
@@ -401,7 +340,7 @@ export async function getAssetUsage(assetId: string): Promise<AssetUsageResult> 
       ...fieldDefaultEntries.map((e) => e.collectionId),
     ]),
   ];
-  const collectionNamesById = await fetchCollectionNames(client, allCollectionIds);
+  const collectionNamesById = await fetchCollectionNames(db, allCollectionIds);
 
   for (const entry of cmsItemEntries) {
     entry.collectionName = collectionNamesById[entry.collectionId] ?? 'Unknown Collection';
@@ -430,13 +369,8 @@ export async function getBulkAssetUsage(
     return {};
   }
 
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  // Initialize results
   const results: Record<string, AssetUsageResult> = {};
   for (const assetId of assetIds) {
     results[assetId] = { pages: [], components: [], cmsItems: [], fieldDefaults: [], total: 0 };
@@ -445,16 +379,10 @@ export async function getBulkAssetUsage(
   // Create a set for faster lookup
   const assetIdSet = new Set(assetIds);
 
-  // Check page layers
-  const { data: pageLayersRecords, error: pageLayersError } = await client
-    .from('page_layers')
-    .select('id, page_id, layers')
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (pageLayersError) {
-    throw new Error(`Failed to fetch page layers: ${pageLayersError.message}`);
-  }
+  const pageLayersRecords = await db('page_layers')
+    .select('id', 'page_id', 'layers')
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   // Track page IDs per asset
   const pageIdsByAsset: Record<string, Set<string>> = {};
@@ -472,16 +400,10 @@ export async function getBulkAssetUsage(
     }
   }
 
-  // Check page settings
-  const { data: pages, error: pagesError } = await client
-    .from('pages')
-    .select('id, settings')
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (pagesError) {
-    throw new Error(`Failed to fetch pages: ${pagesError.message}`);
-  }
+  const pages = await db('pages')
+    .select('id', 'settings')
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   for (const page of pages || []) {
     if (!page.settings) continue;
@@ -497,11 +419,10 @@ export async function getBulkAssetUsage(
   const pageIds = [...new Set(assetIds.flatMap((id) => [...pageIdsByAsset[id]]))];
   let pageNamesById: Record<string, string> = {};
   if (pageIds.length > 0) {
-    const { data: pagesWithNames } = await client
-      .from('pages')
-      .select('id, name')
-      .in('id', pageIds)
-      .eq('is_published', false);
+    const pagesWithNames = await db('pages')
+      .select('id', 'name')
+      .whereIn('id', pageIds)
+      .where('is_published', false);
     pageNamesById = (pagesWithNames || []).reduce((acc, p) => ({ ...acc, [p.id]: p.name ?? 'Unknown Page' }), {});
   }
 
@@ -512,16 +433,10 @@ export async function getBulkAssetUsage(
     }));
   }
 
-  // Check components
-  const { data: components, error: componentsError } = await client
-    .from('components')
-    .select('id, name, layers')
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (componentsError) {
-    throw new Error(`Failed to fetch components: ${componentsError.message}`);
-  }
+  const components = await db('components')
+    .select('id', 'name', 'layers')
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   for (const component of components || []) {
     if (!component.layers) continue;
@@ -536,31 +451,21 @@ export async function getBulkAssetUsage(
   // Check CMS items
   let cmsCollectionIds: string[] = [];
 
-  const { data: imageFields, error: fieldsError } = await client
-    .from('collection_fields')
+  const imageFields: Array<{ id: string }> = await db('collection_fields')
     .select('id')
-    .in('type', ['image', 'file'])
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (fieldsError) {
-    throw new Error(`Failed to fetch collection fields: ${fieldsError.message}`);
-  }
+    .whereIn('type', ['image', 'file'])
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   if (imageFields && imageFields.length > 0) {
     const fieldIds = imageFields.map((f) => f.id);
 
-    const { data: itemValues, error: valuesError } = await client
-      .from('collection_item_values')
-      .select('item_id, value')
-      .in('field_id', fieldIds)
-      .in('value', assetIds)
-      .eq('is_published', false)
-      .is('deleted_at', null);
-
-    if (valuesError) {
-      throw new Error(`Failed to fetch item values: ${valuesError.message}`);
-    }
+    const itemValues = await db('collection_item_values')
+      .select('item_id', 'value')
+      .whereIn('field_id', fieldIds)
+      .whereIn('value', assetIds)
+      .where('is_published', false)
+      .whereNull('deleted_at');
 
     const itemIdsByAsset: Record<string, Set<string>> = {};
     for (const assetId of assetIds) {
@@ -577,12 +482,11 @@ export async function getBulkAssetUsage(
     const itemCollectionById: Record<string, string> = {};
 
     if (uniqueItemIds.length > 0) {
-      const { data: items } = await client
-        .from('collection_items')
-        .select('id, collection_id')
-        .in('id', uniqueItemIds)
-        .eq('is_published', false)
-        .is('deleted_at', null);
+      const items = await db('collection_items')
+        .select('id', 'collection_id')
+        .whereIn('id', uniqueItemIds)
+        .where('is_published', false)
+        .whereNull('deleted_at');
 
       (items || []).forEach((i: any) => {
         itemCollectionById[i.id] = i.collection_id;
@@ -600,7 +504,7 @@ export async function getBulkAssetUsage(
   }
 
   // Check collection field defaults
-  const assetFieldsWithDefaults = await fetchAssetFieldsWithDefaults(client);
+  const assetFieldsWithDefaults = await fetchAssetFieldsWithDefaults(db);
 
   for (const field of assetFieldsWithDefaults) {
     const defaultVal = field.default as string;
@@ -626,7 +530,7 @@ export async function getBulkAssetUsage(
     }
   }
   const allCollectionIds = [...new Set([...cmsCollectionIds, ...defaultCollectionIds])];
-  const collectionNamesById = await fetchCollectionNames(client, allCollectionIds);
+  const collectionNamesById = await fetchCollectionNames(db, allCollectionIds);
 
   for (const assetId of assetIds) {
     for (const entry of results[assetId].cmsItems) {
@@ -785,11 +689,7 @@ export interface AssetCleanupResult {
  * Returns affected entities with before/after states for version tracking
  */
 export async function cleanupAssetReferences(assetId: string): Promise<AssetCleanupResult> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const db = await getKnexClient();
 
   let pagesUpdated = 0;
   let componentsUpdated = 0;
@@ -797,16 +697,10 @@ export async function cleanupAssetReferences(assetId: string): Promise<AssetClea
   const affectedPages: AffectedPageEntity[] = [];
   const affectedComponents: AffectedComponentEntity[] = [];
 
-  // 1. Update page layers (draft versions)
-  const { data: pageLayersRecords, error: pageLayersError } = await client
-    .from('page_layers')
-    .select('id, page_id, layers')
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (pageLayersError) {
-    throw new Error(`Failed to fetch page layers: ${pageLayersError.message}`);
-  }
+  const pageLayersRecords = await db('page_layers')
+    .select('id', 'page_id', 'layers')
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   const pageLayersToUpdate: Array<{ id: string; pageId: string; previousLayers: Layer[]; newLayers: Layer[] }> = [];
 
@@ -825,31 +719,23 @@ export async function cleanupAssetReferences(assetId: string): Promise<AssetClea
   // Batch update page layers
   if (pageLayersToUpdate.length > 0) {
     for (const { id, pageId, previousLayers, newLayers } of pageLayersToUpdate) {
-      const { error } = await client
-        .from('page_layers')
-        .update({ layers: newLayers, updated_at: new Date().toISOString() })
-        .eq('id', id)
-        .eq('is_published', false);
-
-      if (error) {
-        console.error(`Failed to update page_layers ${id}:`, error);
-      } else {
+      try {
+        await db('page_layers')
+          .where('id', id)
+          .where('is_published', false)
+          .update({ layers: JSON.stringify(newLayers), updated_at: new Date().toISOString() });
         pagesUpdated++;
         affectedPages.push({ pageId, previousLayers, newLayers });
+      } catch (error) {
+        console.error(`Failed to update page_layers ${id}:`, error);
       }
     }
   }
 
-  // 2. Update page settings (SEO images)
-  const { data: pagesData, error: pagesError } = await client
-    .from('pages')
-    .select('id, settings')
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (pagesError) {
-    throw new Error(`Failed to fetch pages: ${pagesError.message}`);
-  }
+  const pagesData = await db('pages')
+    .select('id', 'settings')
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   const pagesToUpdate: Array<{ id: string; settings: any }> = [];
 
@@ -866,29 +752,22 @@ export async function cleanupAssetReferences(assetId: string): Promise<AssetClea
   // Batch update pages
   if (pagesToUpdate.length > 0) {
     for (const { id, settings } of pagesToUpdate) {
-      const { error } = await client
-        .from('pages')
-        .update({ settings, updated_at: new Date().toISOString() })
-        .eq('id', id)
-        .eq('is_published', false);
-
-      if (error) {
+      try {
+        await db('pages')
+          .where('id', id)
+          .where('is_published', false)
+          .update({ settings: JSON.stringify(settings), updated_at: new Date().toISOString() });
+      } catch (error) {
         console.error(`Failed to update page ${id}:`, error);
       }
       // Note: page settings changes don't need layer version tracking
     }
   }
 
-  // 3. Update components (draft versions)
-  const { data: components, error: componentsError } = await client
-    .from('components')
-    .select('id, layers')
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (componentsError) {
-    throw new Error(`Failed to fetch components: ${componentsError.message}`);
-  }
+  const components = await db('components')
+    .select('id', 'layers')
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   const componentsToUpdate: Array<{ id: string; previousLayers: Layer[]; newLayers: Layer[] }> = [];
 
@@ -906,56 +785,43 @@ export async function cleanupAssetReferences(assetId: string): Promise<AssetClea
   // Batch update components
   if (componentsToUpdate.length > 0) {
     for (const { id, previousLayers, newLayers } of componentsToUpdate) {
-      const { error } = await client
-        .from('components')
-        .update({ layers: newLayers, updated_at: new Date().toISOString() })
-        .eq('id', id)
-        .eq('is_published', false);
-
-      if (error) {
-        console.error(`Failed to update component ${id}:`, error);
-      } else {
+      try {
+        await db('components')
+          .where('id', id)
+          .where('is_published', false)
+          .update({ layers: JSON.stringify(newLayers), updated_at: new Date().toISOString() });
         componentsUpdated++;
         affectedComponents.push({ componentId: id, previousLayers, newLayers });
+      } catch (error) {
+        console.error(`Failed to update component ${id}:`, error);
       }
     }
   }
 
-  // 4. Update CMS collection item values (nullify asset references)
-  const { data: imageFields, error: fieldsError } = await client
-    .from('collection_fields')
+  const imageFieldsForCleanup = await db('collection_fields')
     .select('id')
-    .in('type', ['image', 'file'])
-    .eq('is_published', false)
-    .is('deleted_at', null);
+    .whereIn('type', ['image', 'file'])
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
-  if (fieldsError) {
-    throw new Error(`Failed to fetch collection fields: ${fieldsError.message}`);
-  }
+  if (imageFieldsForCleanup && imageFieldsForCleanup.length > 0) {
+    const fieldIds = imageFieldsForCleanup.map((f) => f.id);
 
-  if (imageFields && imageFields.length > 0) {
-    const fieldIds = imageFields.map((f) => f.id);
-
-    // Update all values that reference this asset to null
-    const { data: updatedValues, error: updateError } = await client
-      .from('collection_item_values')
-      .update({ value: null, updated_at: new Date().toISOString() })
-      .in('field_id', fieldIds)
-      .eq('value', assetId)
-      .eq('is_published', false)
-      .is('deleted_at', null)
-      .select('id');
-
-    if (updateError) {
+    try {
+      cmsItemsUpdated = await db('collection_item_values')
+        .whereIn('field_id', fieldIds)
+        .where('value', assetId)
+        .where('is_published', false)
+        .whereNull('deleted_at')
+        .update({ value: null, updated_at: new Date().toISOString() });
+    } catch (updateError) {
       console.error('Failed to update CMS values:', updateError);
-    } else {
-      cmsItemsUpdated = updatedValues?.length ?? 0;
     }
   }
 
   // 5. Update collection field defaults that reference this asset
   let fieldDefaultsUpdated = 0;
-  const assetFieldsWithDefaults = await fetchAssetFieldsWithDefaults(client, 'id, default');
+  const assetFieldsWithDefaults = await fetchAssetFieldsWithDefaults(db, ['id', 'default']);
 
   for (const field of assetFieldsWithDefaults) {
     const defaultVal = field.default as string;
@@ -970,16 +836,14 @@ export async function cleanupAssetReferences(assetId: string): Promise<AssetClea
       newDefault = filtered.length > 0 ? JSON.stringify(filtered) : null;
     }
 
-    const { error: updateError } = await client
-      .from('collection_fields')
-      .update({ default: newDefault, updated_at: new Date().toISOString() })
-      .eq('id', field.id)
-      .eq('is_published', false);
-
-    if (updateError) {
-      console.error(`Failed to update field default ${field.id}:`, updateError);
-    } else {
+    try {
+      await db('collection_fields')
+        .where('id', field.id)
+        .where('is_published', false)
+        .update({ default: newDefault, updated_at: new Date().toISOString() });
       fieldDefaultsUpdated++;
+    } catch (updateError) {
+      console.error(`Failed to update field default ${field.id}:`, updateError);
     }
   }
 

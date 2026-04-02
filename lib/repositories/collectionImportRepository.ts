@@ -1,4 +1,4 @@
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getKnexClient } from '@/lib/knex-client';
 import type { CollectionImport, CollectionImportStatus } from '@/types';
 
 /**
@@ -19,30 +19,20 @@ export interface CreateImportData {
  * Create a new import job
  */
 export async function createImport(data: CreateImportData): Promise<CollectionImport> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data: result, error } = await client
-    .from('collection_imports')
+  const [result] = await db('collection_imports')
     .insert({
       collection_id: data.collection_id,
-      column_mapping: data.column_mapping,
-      csv_data: data.csv_data,
+      column_mapping: JSON.stringify(data.column_mapping),
+      csv_data: JSON.stringify(data.csv_data),
       total_rows: data.total_rows,
       status: 'pending',
       processed_rows: 0,
       failed_rows: 0,
-      errors: [],
+      errors: JSON.stringify([]),
     })
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to create import: ${error.message}`);
-  }
+    .returning('*');
 
   return result;
 }
@@ -51,47 +41,29 @@ export async function createImport(data: CreateImportData): Promise<CollectionIm
  * Get import by ID
  */
 export async function getImportById(id: string): Promise<CollectionImport | null> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('collection_imports')
+  const data = await db('collection_imports')
     .select('*')
-    .eq('id', id)
-    .single();
+    .where('id', id)
+    .first();
 
-  if (error && error.code !== 'PGRST116') {
-    throw new Error(`Failed to fetch import: ${error.message}`);
-  }
-
-  return data;
+  return data || null;
 }
 
 /**
  * Get pending or processing imports (for background processing)
  */
 export async function getPendingImports(limit: number = 5): Promise<CollectionImport[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('collection_imports')
+  const data = await db('collection_imports')
     .select('*')
-    .in('status', ['pending', 'processing'])
-    .order('created_at', { ascending: true })
+    .whereIn('status', ['pending', 'processing'])
+    .orderBy('created_at', 'asc')
     .limit(limit);
 
-  if (error) {
-    throw new Error(`Failed to fetch pending imports: ${error.message}`);
-  }
-
-  return data || [];
+  return data;
 }
 
 /**
@@ -101,23 +73,14 @@ export async function updateImportStatus(
   id: string,
   status: CollectionImportStatus
 ): Promise<void> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { error } = await client
-    .from('collection_imports')
+  await db('collection_imports')
+    .where('id', id)
     .update({
       status,
       updated_at: new Date().toISOString(),
-    })
-    .eq('id', id);
-
-  if (error) {
-    throw new Error(`Failed to update import status: ${error.message}`);
-  }
+    });
 }
 
 /**
@@ -129,11 +92,7 @@ export async function updateImportProgress(
   failedRows: number,
   errors: string[] | null = null
 ): Promise<void> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   const updateData: Record<string, unknown> = {
     processed_rows: processedRows,
@@ -142,17 +101,12 @@ export async function updateImportProgress(
   };
 
   if (errors !== null) {
-    updateData.errors = errors;
+    updateData.errors = JSON.stringify(errors);
   }
 
-  const { error } = await client
-    .from('collection_imports')
-    .update(updateData)
-    .eq('id', id);
-
-  if (error) {
-    throw new Error(`Failed to update import progress: ${error.message}`);
-  }
+  await db('collection_imports')
+    .where('id', id)
+    .update(updateData);
 }
 
 /**
@@ -164,69 +118,42 @@ export async function completeImport(
   failedRows: number,
   errors: string[]
 ): Promise<void> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   const status: CollectionImportStatus = failedRows > 0 && processedRows === 0 ? 'failed' : 'completed';
 
-  const { error } = await client
-    .from('collection_imports')
+  await db('collection_imports')
+    .where('id', id)
     .update({
       status,
       processed_rows: processedRows,
       failed_rows: failedRows,
-      errors: errors.length > 0 ? errors : null,
+      errors: errors.length > 0 ? JSON.stringify(errors) : null,
       updated_at: new Date().toISOString(),
-    })
-    .eq('id', id);
-
-  if (error) {
-    throw new Error(`Failed to complete import: ${error.message}`);
-  }
+    });
 }
 
 /**
  * Delete import job
  */
 export async function deleteImport(id: string): Promise<void> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { error } = await client
-    .from('collection_imports')
-    .delete()
-    .eq('id', id);
-
-  if (error) {
-    throw new Error(`Failed to delete import: ${error.message}`);
-  }
+  await db('collection_imports')
+    .where('id', id)
+    .delete();
 }
 
 /**
  * Get imports for a collection
  */
 export async function getImportsByCollectionId(collectionId: string): Promise<CollectionImport[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('collection_imports')
+  const data = await db('collection_imports')
     .select('*')
-    .eq('collection_id', collectionId)
-    .order('created_at', { ascending: false });
+    .where('collection_id', collectionId)
+    .orderBy('created_at', 'desc');
 
-  if (error) {
-    throw new Error(`Failed to fetch imports: ${error.message}`);
-  }
-
-  return data || [];
+  return data;
 }

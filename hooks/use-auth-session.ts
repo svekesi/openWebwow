@@ -1,36 +1,38 @@
 'use client';
 
 /**
- * Hook to check the current Supabase auth session.
- * Gracefully returns null if Supabase is not configured.
+ * Hook to check the current auth session via the simple auth API.
  */
 
 import { useEffect, useState } from 'react';
-import { createBrowserClient } from '@/lib/supabase-browser';
-import type { Session } from '@supabase/supabase-js';
+
+interface SimpleSession {
+  user: {
+    id: string;
+    email: string;
+    display_name: string;
+  } | null;
+}
 
 interface AuthSessionState {
-  session: Session | null;
+  session: SimpleSession | null;
   isLoading: boolean;
 }
 
 export function useAuthSession(): AuthSessionState {
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<SimpleSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const checkSession = async () => {
       try {
-        const client = await createBrowserClient();
-        if (!client) {
-          setIsLoading(false);
-          return;
+        const res = await fetch('/ycode/api/auth/session');
+        if (res.ok) {
+          const data = await res.json();
+          setSession(data);
         }
-
-        const { data } = await client.auth.getSession();
-        setSession(data.session);
       } catch {
-        // Supabase not available — treated as no session
+        // Auth API not available — treated as no session
       } finally {
         setIsLoading(false);
       }

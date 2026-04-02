@@ -11,13 +11,11 @@ export async function up(knex: Knex): Promise<void> {
   // Drop existing tables if they exist (to handle schema changes during development)
   const hasWebhookDeliveries = await knex.schema.hasTable('webhook_deliveries');
   if (hasWebhookDeliveries) {
-    await knex.schema.raw('DROP POLICY IF EXISTS "Authenticated users can view webhook_deliveries" ON webhook_deliveries');
     await knex.schema.dropTable('webhook_deliveries');
   }
 
   const hasWebhooks = await knex.schema.hasTable('webhooks');
   if (hasWebhooks) {
-    await knex.schema.raw('DROP POLICY IF EXISTS "Authenticated users can manage webhooks" ON webhooks');
     await knex.schema.dropTable('webhooks');
   }
 
@@ -35,16 +33,6 @@ export async function up(knex: Knex): Promise<void> {
     table.timestamp('created_at', { useTz: true }).defaultTo(knex.fn.now());
     table.timestamp('updated_at', { useTz: true }).defaultTo(knex.fn.now());
   });
-
-  // Enable Row Level Security for webhooks
-  await knex.schema.raw('ALTER TABLE webhooks ENABLE ROW LEVEL SECURITY');
-
-  // Create RLS policy for webhooks
-  await knex.schema.raw(`
-    CREATE POLICY "Authenticated users can manage webhooks"
-      ON webhooks FOR ALL
-      USING ((SELECT auth.uid()) IS NOT NULL)
-  `);
 
   // Create webhook_deliveries table for logging
   await knex.schema.createTable('webhook_deliveries', (table) => {
@@ -64,22 +52,9 @@ export async function up(knex: Knex): Promise<void> {
   await knex.schema.raw('CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_webhook_id ON webhook_deliveries(webhook_id)');
   await knex.schema.raw('CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_created_at ON webhook_deliveries(created_at DESC)');
 
-  // Enable Row Level Security for webhook_deliveries
-  await knex.schema.raw('ALTER TABLE webhook_deliveries ENABLE ROW LEVEL SECURITY');
-
-  // Create RLS policy for webhook_deliveries
-  await knex.schema.raw(`
-    CREATE POLICY "Authenticated users can view webhook_deliveries"
-      ON webhook_deliveries FOR ALL
-      USING ((SELECT auth.uid()) IS NOT NULL)
-  `);
 }
 
 export async function down(knex: Knex): Promise<void> {
-  // Drop policies
-  await knex.schema.raw('DROP POLICY IF EXISTS "Authenticated users can view webhook_deliveries" ON webhook_deliveries');
-  await knex.schema.raw('DROP POLICY IF EXISTS "Authenticated users can manage webhooks" ON webhooks');
-
   // Drop tables (webhook_deliveries first due to foreign key)
   await knex.schema.dropTableIfExists('webhook_deliveries');
   await knex.schema.dropTableIfExists('webhooks');

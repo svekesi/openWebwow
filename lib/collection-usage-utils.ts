@@ -5,7 +5,7 @@
  * across pages, components, and other collections (reference fields).
  */
 
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getKnexClient } from '@/lib/knex-client';
 import type { Layer, CollectionVariable, FieldVariable, DesignColorVariable } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -201,8 +201,7 @@ function layersReferenceField(layers: Layer[], fieldId: string): boolean {
  * Get collection usage across pages, components, and reference fields
  */
 export async function getCollectionUsage(collectionId: string): Promise<CollectionUsageResult> {
-  const client = await getSupabaseAdmin();
-  if (!client) throw new Error('Supabase not configured');
+  const db = await getKnexClient();
 
   const pages: UsageEntry[] = [];
   const components: UsageEntry[] = [];
@@ -210,14 +209,10 @@ export async function getCollectionUsage(collectionId: string): Promise<Collecti
 
   const pageIdsWithUsage = new Set<string>();
 
-  // 1. Check page layers for collection bindings
-  const { data: pageLayersRecords, error: plErr } = await client
-    .from('page_layers')
-    .select('page_id, layers')
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (plErr) throw new Error(`Failed to fetch page layers: ${plErr.message}`);
+  const pageLayersRecords = await db('page_layers')
+    .select('page_id', 'layers')
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   for (const record of pageLayersRecords || []) {
     if (record.layers && layersReferenceCollection(record.layers, collectionId)) {
@@ -225,14 +220,10 @@ export async function getCollectionUsage(collectionId: string): Promise<Collecti
     }
   }
 
-  // 2. Check page-level CMS settings (collection pages)
-  const { data: pagesData, error: pagesErr } = await client
-    .from('pages')
-    .select('id, name, settings')
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (pagesErr) throw new Error(`Failed to fetch pages: ${pagesErr.message}`);
+  const pagesData = await db('pages')
+    .select('id', 'name', 'settings')
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   for (const page of pagesData || []) {
     if (page.settings?.cms?.collection_id === collectionId) {
@@ -240,20 +231,15 @@ export async function getCollectionUsage(collectionId: string): Promise<Collecti
     }
   }
 
-  // Build page entries with names
   for (const pageId of pageIdsWithUsage) {
     const page = (pagesData || []).find((p) => p.id === pageId);
     pages.push({ id: pageId, name: page?.name ?? 'Unknown Page' });
   }
 
-  // 3. Check components
-  const { data: componentsData, error: compErr } = await client
-    .from('components')
-    .select('id, name, layers')
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (compErr) throw new Error(`Failed to fetch components: ${compErr.message}`);
+  const componentsData = await db('components')
+    .select('id', 'name', 'layers')
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   for (const component of componentsData || []) {
     if (component.layers && layersReferenceCollection(component.layers, collectionId)) {
@@ -261,27 +247,20 @@ export async function getCollectionUsage(collectionId: string): Promise<Collecti
     }
   }
 
-  // 4. Check reference fields pointing to this collection
-  const { data: refFields, error: rfErr } = await client
-    .from('collection_fields')
-    .select('id, name, collection_id')
-    .eq('reference_collection_id', collectionId)
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (rfErr) throw new Error(`Failed to fetch reference fields: ${rfErr.message}`);
+  const refFields = await db('collection_fields')
+    .select('id', 'name', 'collection_id')
+    .where('reference_collection_id', collectionId)
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   if (refFields && refFields.length > 0) {
     const parentCollectionIds = [...new Set(refFields.map((f) => f.collection_id))];
 
-    const { data: parentCollections, error: pcErr } = await client
-      .from('collections')
-      .select('id, name')
-      .in('id', parentCollectionIds)
-      .eq('is_published', false)
-      .is('deleted_at', null);
-
-    if (pcErr) throw new Error(`Failed to fetch collections: ${pcErr.message}`);
+    const parentCollections = await db('collections')
+      .select('id', 'name')
+      .whereIn('id', parentCollectionIds)
+      .where('is_published', false)
+      .whereNull('deleted_at');
 
     const collectionNames: Record<string, string> = {};
     (parentCollections || []).forEach((c) => {
@@ -310,22 +289,17 @@ export async function getCollectionUsage(collectionId: string): Promise<Collecti
  * Get collection field usage across pages and components (layer bindings)
  */
 export async function getCollectionFieldUsage(fieldId: string): Promise<CollectionFieldUsageResult> {
-  const client = await getSupabaseAdmin();
-  if (!client) throw new Error('Supabase not configured');
+  const db = await getKnexClient();
 
   const pages: UsageEntry[] = [];
   const components: UsageEntry[] = [];
 
   const pageIdsWithUsage = new Set<string>();
 
-  // 1. Check page layers for field bindings
-  const { data: pageLayersRecords, error: plErr } = await client
-    .from('page_layers')
-    .select('page_id, layers')
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (plErr) throw new Error(`Failed to fetch page layers: ${plErr.message}`);
+  const pageLayersRecords = await db('page_layers')
+    .select('page_id', 'layers')
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   for (const record of pageLayersRecords || []) {
     if (record.layers && layersReferenceField(record.layers, fieldId)) {
@@ -333,20 +307,15 @@ export async function getCollectionFieldUsage(fieldId: string): Promise<Collecti
     }
   }
 
-  // 2. Check page-level CMS settings (slug field)
-  const { data: pagesData, error: pagesErr } = await client
-    .from('pages')
-    .select('id, name, settings')
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (pagesErr) throw new Error(`Failed to fetch pages: ${pagesErr.message}`);
+  const pagesData = await db('pages')
+    .select('id', 'name', 'settings')
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   for (const page of pagesData || []) {
     if (page.settings?.cms?.slug_field_id === fieldId) {
       pageIdsWithUsage.add(page.id);
     }
-    // SEO image field binding
     const seoImage = page.settings?.seo?.image;
     if (seoImage && typeof seoImage === 'object' && (seoImage as FieldVariable).type === 'field') {
       if ((seoImage as FieldVariable).data?.field_id === fieldId) {
@@ -355,20 +324,15 @@ export async function getCollectionFieldUsage(fieldId: string): Promise<Collecti
     }
   }
 
-  // Build page entries
   for (const pageId of pageIdsWithUsage) {
     const page = (pagesData || []).find((p) => p.id === pageId);
     pages.push({ id: pageId, name: page?.name ?? 'Unknown Page' });
   }
 
-  // 3. Check components
-  const { data: componentsData, error: compErr } = await client
-    .from('components')
-    .select('id, name, layers')
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (compErr) throw new Error(`Failed to fetch components: ${compErr.message}`);
+  const componentsData = await db('components')
+    .select('id', 'name', 'layers')
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   for (const component of componentsData || []) {
     if (component.layers && layersReferenceField(component.layers, fieldId)) {

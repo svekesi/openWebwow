@@ -28,7 +28,7 @@ import { buildSlugPath, buildDynamicPageUrl, buildLocalizedSlugPath, buildLocali
 
 // 5. Types
 import type { Page } from '@/types';
-import type { User } from '@supabase/supabase-js';
+interface User { id: string; email?: string; user_metadata?: Record<string, any>; }
 import ActiveUsersInHeader from './ActiveUsersInHeader';
 import InviteUserButton from './InviteUserButton';
 import PublishPopover from './PublishPopover';

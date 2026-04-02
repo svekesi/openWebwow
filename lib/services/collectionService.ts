@@ -12,7 +12,7 @@
  */
 
 import { withTransaction } from '../database/transaction';
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getKnexClient } from '@/lib/knex-client';
 import { getCollectionById, hardDeleteCollection } from '@/lib/repositories/collectionRepository';
 import { getFieldsByCollectionId } from '@/lib/repositories/collectionFieldRepository';
 import { getItemsByCollectionId, getAllItemsByCollectionId, getItemById, getItemsByIds } from '@/lib/repositories/collectionItemRepository';
@@ -257,22 +257,15 @@ async function validatePublishRequest(
  * @returns true if collection was actually upserted
  */
 async function publishCollectionMetadata(collectionId: string): Promise<boolean> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  // Get the draft version
   const draft = await getCollectionById(collectionId, false);
   if (!draft) {
     throw new Error('Draft collection not found');
   }
 
-  // Get existing published version for comparison
   const published = await getCollectionById(collectionId, true);
 
-  // Skip if published version exists and all fields match
   if (published &&
     published.name === draft.name &&
     JSON.stringify(published.sorting) === JSON.stringify(draft.sorting) &&
@@ -280,10 +273,8 @@ async function publishCollectionMetadata(collectionId: string): Promise<boolean>
     return false;
   }
 
-  // Upsert published version (composite key handles insert/update automatically)
-  const { error } = await client
-    .from('collections')
-    .upsert({
+  await db('collections')
+    .insert({
       id: draft.id,
       name: draft.name,
       sorting: draft.sorting,
@@ -291,13 +282,9 @@ async function publishCollectionMetadata(collectionId: string): Promise<boolean>
       is_published: true,
       created_at: draft.created_at,
       updated_at: new Date().toISOString(),
-    }, {
-      onConflict: 'id,is_published',
-    });
-
-  if (error) {
-    throw new Error(`Failed to publish collection: ${error.message}`);
-  }
+    })
+    .onConflict(['id', 'is_published'])
+    .merge();
 
   return true;
 }
@@ -309,11 +296,7 @@ async function publishCollectionMetadata(collectionId: string): Promise<boolean>
  * @returns Number of fields actually published
  */
 async function publishAllFields(collectionId: string): Promise<number> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const db = await getKnexClient();
 
   // Get all draft fields
   const draftFields = await getFieldsByCollectionId(collectionId, false);
@@ -373,16 +356,10 @@ async function publishAllFields(collectionId: string): Promise<number> {
     return 0;
   }
 
-  // Batch upsert changed fields
-  const { error } = await client
-    .from('collection_fields')
-    .upsert(fieldsToUpsert, {
-      onConflict: 'id,is_published', // Composite primary key
-    });
-
-  if (error) {
-    throw new Error(`Failed to publish fields: ${error.message}`);
-  }
+  await db('collection_fields')
+    .insert(fieldsToUpsert)
+    .onConflict(['id', 'is_published'])
+    .merge();
 
   return fieldsToUpsert.length;
 }
@@ -399,11 +376,7 @@ async function publishSelectedItems(
   collectionId: string,
   itemIds?: string[]
 ): Promise<{ itemsCount: number; valuesCount: number; itemsDurationMs: number; valuesDurationMs: number }> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const db = await getKnexClient();
 
   let itemsToPublish: string[];
 
@@ -430,14 +403,12 @@ async function publishSelectedItems(
   const publishableItems = draftItems.filter(item => item.is_publishable);
   const nonPublishableItems = draftItems.filter(item => !item.is_publishable);
 
-  // Remove published versions of non-publishable items
   if (nonPublishableItems.length > 0) {
     const nonPublishableIds = nonPublishableItems.map(item => item.id);
-    await client
-      .from('collection_items')
-      .delete()
-      .in('id', nonPublishableIds)
-      .eq('is_published', true);
+    await db('collection_items')
+      .whereIn('id', nonPublishableIds)
+      .where('is_published', true)
+      .delete();
   }
 
   if (publishableItems.length === 0) {
@@ -483,17 +454,11 @@ async function publishSelectedItems(
     itemIdsToPublishValues.push(item.id);
   }
 
-  // Batch upsert changed items only
   if (itemsToUpsert.length > 0) {
-    const { error: itemsError } = await client
-      .from('collection_items')
-      .upsert(itemsToUpsert, {
-        onConflict: 'id,is_published', // Composite primary key
-      });
-
-    if (itemsError) {
-      throw new Error(`Failed to publish items: ${itemsError.message}`);
-    }
+    await db('collection_items')
+      .insert(itemsToUpsert)
+      .onConflict(['id', 'is_published'])
+      .merge();
   }
 
   const itemsDurationMs = Math.round(performance.now() - itemsStart);
@@ -514,11 +479,7 @@ async function publishSelectedItems(
  * @returns Number of values actually published (changed)
  */
 async function publishItemValuesBatch(itemIds: string[]): Promise<number> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const db = await getKnexClient();
 
   if (itemIds.length === 0) {
     return 0;
@@ -575,16 +536,10 @@ async function publishItemValuesBatch(itemIds: string[]): Promise<number> {
     return 0;
   }
 
-  // Batch upsert changed values only
-  const { error } = await client
-    .from('collection_item_values')
-    .upsert(valuesToUpsert, {
-      onConflict: 'id,is_published',
-    });
-
-  if (error) {
-    throw new Error(`Failed to publish item values: ${error.message}`);
-  }
+  await db('collection_item_values')
+    .insert(valuesToUpsert)
+    .onConflict(['id', 'is_published'])
+    .merge();
 
   return valuesToUpsert.length;
 }
@@ -665,11 +620,7 @@ async function hasValueChanges(itemId: string): Promise<boolean> {
  * If a draft item is soft-deleted, permanently remove both draft and published versions
  */
 async function cleanupDeletedPublishedItems(collectionId: string): Promise<void> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   // Get all soft-deleted items from draft (with pagination for >1000 items)
   const deletedDraftItems = await getAllItemsByCollectionId(
@@ -685,63 +636,41 @@ async function cleanupDeletedPublishedItems(collectionId: string): Promise<void>
   // Extract item IDs
   const deletedItemIds = deletedDraftItems.map(item => item.id);
 
-  // Batch hard delete published versions (CASCADE will delete values)
-  await client
-    .from('collection_items')
-    .delete()
-    .in('id', deletedItemIds)
-    .eq('is_published', true);
+  await db('collection_items')
+    .whereIn('id', deletedItemIds)
+    .where('is_published', true)
+    .delete();
 
-  // Batch hard delete draft versions (CASCADE will delete values)
-  await client
-    .from('collection_items')
-    .delete()
-    .in('id', deletedItemIds)
-    .eq('is_published', false);
+  await db('collection_items')
+    .whereIn('id', deletedItemIds)
+    .where('is_published', false)
+    .delete();
 }
 
-/**
- * Clean up soft-deleted fields in both draft and published versions
- * Uses batch DELETE for efficiency
- * If a draft field is soft-deleted, permanently remove both draft and published versions
- * This also removes all associated collection_item_values via CASCADE
- */
 async function cleanupDeletedPublishedFields(collectionId: string): Promise<void> {
-  // Get all fields (including soft-deleted) from draft by querying directly
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  // Query for soft-deleted draft fields
-  const { data: deletedDraftFields, error } = await client
-    .from('collection_fields')
+  const deletedDraftFields = await db('collection_fields')
     .select('*')
-    .eq('collection_id', collectionId)
-    .eq('is_published', false)
-    .not('deleted_at', 'is', null); // Only get deleted fields
+    .where('collection_id', collectionId)
+    .where('is_published', false)
+    .whereNotNull('deleted_at');
 
-  if (error || !deletedDraftFields || deletedDraftFields.length === 0) {
+  if (!deletedDraftFields || deletedDraftFields.length === 0) {
     return;
   }
 
-  // Extract field IDs
   const deletedFieldIds = deletedDraftFields.map(field => field.id);
 
-  // Batch hard delete published versions (CASCADE will delete values)
-  await client
-    .from('collection_fields')
-    .delete()
-    .in('id', deletedFieldIds)
-    .eq('is_published', true);
+  await db('collection_fields')
+    .whereIn('id', deletedFieldIds)
+    .where('is_published', true)
+    .delete();
 
-  // Batch hard delete draft versions (CASCADE will delete values)
-  await client
-    .from('collection_fields')
-    .delete()
-    .in('id', deletedFieldIds)
-    .eq('is_published', false);
+  await db('collection_fields')
+    .whereIn('id', deletedFieldIds)
+    .where('is_published', false)
+    .delete();
 }
 
 /**
@@ -768,43 +697,28 @@ async function cleanupDeletedCollection(collectionId: string): Promise<void> {
  * Called during publish operations to ensure deleted collections are permanently removed
  */
 export async function cleanupDeletedCollections(): Promise<void> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  // Find all soft-deleted draft collections
-  const { data: deletedCollections, error } = await client
-    .from('collections')
+  const deletedCollections = await db('collections')
     .select('id')
-    .eq('is_published', false)
-    .not('deleted_at', 'is', null);
-
-  if (error) {
-    throw new Error(`Failed to fetch deleted collections: ${error.message}`);
-  }
+    .where('is_published', false)
+    .whereNotNull('deleted_at');
 
   if (!deletedCollections || deletedCollections.length === 0) {
     return;
   }
 
-  // Extract collection IDs
   const collectionIds = deletedCollections.map(c => c.id);
 
-  // Batch delete published versions (CASCADE deletes all related data: fields, items, values)
-  await client
-    .from('collections')
-    .delete()
-    .in('id', collectionIds)
-    .eq('is_published', true);
+  await db('collections')
+    .whereIn('id', collectionIds)
+    .where('is_published', true)
+    .delete();
 
-  // Batch delete draft versions (CASCADE deletes all related data: fields, items, values)
-  await client
-    .from('collections')
-    .delete()
-    .in('id', collectionIds)
-    .eq('is_published', false);
+  await db('collections')
+    .whereIn('id', collectionIds)
+    .where('is_published', false)
+    .delete();
 }
 
 /**
@@ -895,31 +809,21 @@ export async function needsPublishing(collectionId: string): Promise<boolean> {
 export async function groupItemsByCollection(
   itemIds: string[]
 ): Promise<Map<string, string[]>> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
   if (itemIds.length === 0) {
     return new Map();
   }
 
-  const { data: items, error } = await client
-    .from('collection_items')
-    .select('id, collection_id')
-    .eq('is_published', false)
-    .in('id', itemIds);
+  const db = await getKnexClient();
 
-  if (error) {
-    throw new Error(`Failed to fetch collection items: ${error.message}`);
-  }
+  const items = await db('collection_items')
+    .select('id', 'collection_id')
+    .where('is_published', false)
+    .whereIn('id', itemIds);
 
   if (!items) {
     return new Map();
   }
 
-  // Group items by collection
   const itemsByCollection = new Map<string, string[]>();
 
   items.forEach((item: any) => {

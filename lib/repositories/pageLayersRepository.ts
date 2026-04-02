@@ -1,4 +1,5 @@
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getKnexClient } from '@/lib/knex-client';
+import { jsonb } from '@/lib/knex-helpers';
 import type { PageLayers, Layer } from '../../types';
 import { generatePageLayersHash } from '../hash-utils';
 import { deleteTranslationsInBulk, markTranslationsIncomplete } from '@/lib/repositories/translationRepository';
@@ -11,96 +12,56 @@ export async function getLayersByPageId(
   pageId: string,
   isPublished?: boolean
 ): Promise<PageLayers | null> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  let query = client
-    .from('page_layers')
+  let query = db('page_layers')
     .select('*')
-    .eq('page_id', pageId)
-    .is('deleted_at', null);
+    .where('page_id', pageId)
+    .whereNull('deleted_at');
 
-  // Apply is_published filter if provided
   if (isPublished !== undefined) {
-    query = query.eq('is_published', isPublished);
+    query = query.where('is_published', isPublished);
   }
 
-  const { data, error } = await query
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single();
+  const data = await query
+    .orderBy('created_at', 'desc')
+    .first();
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null; // Not found
-    }
-    throw new Error(`Failed to fetch layers: ${error.message}`);
-  }
-
-  return data;
+  return data || null;
 }
 
 /**
  * Get draft layers for a page
  */
 export async function getDraftLayers(pageId: string): Promise<PageLayers | null> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('page_layers')
+  const data = await db('page_layers')
     .select('*')
-    .eq('page_id', pageId)
-    .eq('is_published', false)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single();
+    .where('page_id', pageId)
+    .where('is_published', false)
+    .whereNull('deleted_at')
+    .orderBy('created_at', 'desc')
+    .first();
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null; // Not found
-    }
-    throw new Error(`Failed to fetch draft: ${error.message}`);
-  }
-
-  return data;
+  return data || null;
 }
 
 /**
  * Get published layers for a page
  */
 export async function getPublishedLayers(pageId: string): Promise<PageLayers | null> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('page_layers')
+  const data = await db('page_layers')
     .select('*')
-    .eq('page_id', pageId)
-    .eq('is_published', true)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single();
+    .where('page_id', pageId)
+    .where('is_published', true)
+    .whereNull('deleted_at')
+    .orderBy('created_at', 'desc')
+    .first();
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null; // Not found
-    }
-    throw new Error(`Failed to fetch published layers: ${error.message}`);
-  }
-
-  return data;
+  return data || null;
 }
 
 /**
@@ -114,11 +75,7 @@ export async function upsertDraftLayers(
   layers: Layer[],
   additionalData?: Record<string, any>
 ): Promise<PageLayers> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const db = await getKnexClient();
 
   // Check if draft exists
   const existingDraft = await getDraftLayers(pageId);
@@ -155,7 +112,7 @@ export async function upsertDraftLayers(
 
   // Prepare update data
   const updateData: any = {
-    layers,
+    layers: jsonb(layers),
     content_hash: contentHash,
     updated_at: new Date().toISOString()
   };
@@ -166,16 +123,14 @@ export async function upsertDraftLayers(
 
   if (existingDraft) {
     // Update existing draft
-    const { data, error } = await client
-      .from('page_layers')
+    const [data] = await db('page_layers')
+      .where('id', existingDraft.id)
+      .where('is_published', false)
       .update(updateData)
-      .eq('id', existingDraft.id)
-      .eq('is_published', false)
-      .select()
-      .single();
+      .returning('*');
 
-    if (error) {
-      throw new Error(`Failed to update draft: ${error.message}`);
+    if (!data) {
+      throw new Error('Failed to update draft');
     }
 
     return data;
@@ -183,20 +138,18 @@ export async function upsertDraftLayers(
     // Create new draft with any additional data
     const insertData: any = {
       page_id: pageId,
-      layers,
+      layers: jsonb(layers),
       content_hash: contentHash,
       is_published: false,
       ...additionalData
     };
 
-    const { data, error } = await client
-      .from('page_layers')
+    const [data] = await db('page_layers')
       .insert(insertData)
-      .select()
-      .single();
+      .returning('*');
 
-    if (error) {
-      throw new Error(`Failed to create draft: ${error.message}`);
+    if (!data) {
+      throw new Error('Failed to create draft');
     }
 
     return data;
@@ -208,24 +161,15 @@ export async function upsertDraftLayers(
  * Used for loading all drafts at once in the editor
  */
 export async function getAllDraftLayers(): Promise<PageLayers[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('page_layers')
+  const data = await db('page_layers')
     .select('*')
-    .eq('is_published', false)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false });
+    .where('is_published', false)
+    .whereNull('deleted_at')
+    .orderBy('created_at', 'desc');
 
-  if (error) {
-    throw new Error(`Failed to fetch draft layers: ${error.message}`);
-  }
-
-  return data || [];
+  return data;
 }
 
 /**
@@ -233,29 +177,20 @@ export async function getAllDraftLayers(): Promise<PageLayers[]> {
  * Used for batch publishing optimization
  */
 export async function getDraftLayersForPages(pageIds: string[]): Promise<PageLayers[]> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const db = await getKnexClient();
 
   if (pageIds.length === 0) {
     return [];
   }
 
-  const { data, error } = await client
-    .from('page_layers')
+  const data = await db('page_layers')
     .select('*')
-    .in('page_id', pageIds)
-    .eq('is_published', false)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false });
+    .whereIn('page_id', pageIds)
+    .where('is_published', false)
+    .whereNull('deleted_at')
+    .orderBy('created_at', 'desc');
 
-  if (error) {
-    throw new Error(`Failed to fetch draft layers: ${error.message}`);
-  }
-
-  return data || [];
+  return data;
 }
 
 /**
@@ -263,28 +198,19 @@ export async function getDraftLayersForPages(pageIds: string[]): Promise<PageLay
  * Used for batch publishing optimization
  */
 export async function getPublishedLayersByIds(ids: string[]): Promise<PageLayers[]> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const db = await getKnexClient();
 
   if (ids.length === 0) {
     return [];
   }
 
-  const { data, error } = await client
-    .from('page_layers')
+  const data = await db('page_layers')
     .select('*')
-    .in('id', ids)
-    .eq('is_published', true)
-    .is('deleted_at', null);
+    .whereIn('id', ids)
+    .where('is_published', true)
+    .whereNull('deleted_at');
 
-  if (error) {
-    throw new Error(`Failed to fetch published layers: ${error.message}`);
-  }
-
-  return data || [];
+  return data;
 }
 
 /**
@@ -292,28 +218,16 @@ export async function getPublishedLayersByIds(ids: string[]): Promise<PageLayers
  * Used to find the published version of draft layers
  */
 export async function getPublishedLayersById(id: string): Promise<PageLayers | null> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('page_layers')
+  const data = await db('page_layers')
     .select('*')
-    .eq('id', id)
-    .eq('is_published', true)
-    .is('deleted_at', null)
-    .single();
+    .where('id', id)
+    .where('is_published', true)
+    .whereNull('deleted_at')
+    .first();
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null; // Not found
-    }
-    throw new Error(`Failed to fetch published layers: ${error.message}`);
-  }
-
-  return data;
+  return data || null;
 }
 
 /**
@@ -325,11 +239,7 @@ export async function getPublishedLayersById(id: string): Promise<PageLayers | n
  * Draft layers remain unchanged
  */
 export async function publishPageLayers(draftPageId: string, publishedPageId: string): Promise<PageLayers> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const db = await getKnexClient();
 
   // Get current draft layers
   const draftLayers = await getDraftLayers(draftPageId);
@@ -348,22 +258,20 @@ export async function publishPageLayers(draftPageId: string, publishedPageId: st
     if (hasChanges) {
       // Prepare update data WITHOUT primary key fields (id, is_published)
       const updateData: any = {
-        page_id: publishedPageId, // Same page ID (draft and published pages share same id)
-        layers: draftLayers.layers,
-        content_hash: draftLayers.content_hash, // Copy hash from draft
+        page_id: publishedPageId,
+        layers: jsonb(draftLayers.layers),
+        content_hash: draftLayers.content_hash,
         updated_at: new Date().toISOString(),
       };
 
-      const { data, error } = await client
-        .from('page_layers')
+      const [data] = await db('page_layers')
+        .where('id', existingPublished.id)
+        .where('is_published', true)
         .update(updateData)
-        .eq('id', existingPublished.id)
-        .eq('is_published', true)
-        .select()
-        .single();
+        .returning('*');
 
-      if (error) {
-        throw new Error(`Failed to update published layers: ${error.message}`);
+      if (!data) {
+        throw new Error('Failed to update published layers');
       }
 
       return data;
@@ -373,21 +281,19 @@ export async function publishPageLayers(draftPageId: string, publishedPageId: st
   } else {
     // Create new published version - include ALL fields for insert
     const insertData: any = {
-      id: draftLayers.id, // Use same ID (composite key with is_published)
+      id: draftLayers.id,
       page_id: publishedPageId,
-      layers: draftLayers.layers,
+      layers: jsonb(draftLayers.layers),
       content_hash: draftLayers.content_hash,
       is_published: true,
     };
 
-    const { data, error } = await client
-      .from('page_layers')
+    const [data] = await db('page_layers')
       .insert(insertData)
-      .select()
-      .single();
+      .returning('*');
 
-    if (error) {
-      throw new Error(`Failed to create published layers: ${error.message}`);
+    if (!data) {
+      throw new Error('Failed to create published layers');
     }
 
     return data;
@@ -405,11 +311,7 @@ export async function batchPublishPageLayers(pageIds: string[]): Promise<number>
     return 0;
   }
 
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const db = await getKnexClient();
 
   // Step 1: Batch fetch all draft layers
   const draftLayers = await getDraftLayersForPages(pageIds);
@@ -445,7 +347,7 @@ export async function batchPublishPageLayers(pageIds: string[]): Promise<number>
       layersToUpsert.push({
         id: draft.id,
         page_id: draft.page_id,
-        layers: draft.layers,
+        layers: jsonb(draft.layers),
         content_hash: draft.content_hash,
         is_published: true,
         updated_at: now,
@@ -455,15 +357,10 @@ export async function batchPublishPageLayers(pageIds: string[]): Promise<number>
 
   // Step 4: Batch upsert
   if (layersToUpsert.length > 0) {
-    const { error } = await client
-      .from('page_layers')
-      .upsert(layersToUpsert, {
-        onConflict: 'id,is_published',
-      });
-
-    if (error) {
-      throw new Error(`Failed to batch publish layers: ${error.message}`);
-    }
+    await db('page_layers')
+      .insert(layersToUpsert)
+      .onConflict(['id', 'is_published'])
+      .merge();
   }
 
   return layersToUpsert.length;
@@ -473,22 +370,13 @@ export async function batchPublishPageLayers(pageIds: string[]): Promise<number>
  * Get all layers entries for a page (for history)
  */
 export async function getPageLayers(pageId: string): Promise<PageLayers[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('page_layers')
+  const data = await db('page_layers')
     .select('*')
-    .eq('page_id', pageId)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false });
+    .where('page_id', pageId)
+    .whereNull('deleted_at')
+    .orderBy('created_at', 'desc');
 
-  if (error) {
-    throw new Error(`Failed to fetch layers: ${error.message}`);
-  }
-
-  return data || [];
+  return data;
 }

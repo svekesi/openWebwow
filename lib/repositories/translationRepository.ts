@@ -5,7 +5,7 @@
  * Supports draft/published workflow with composite primary key (id, is_published)
  */
 
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getKnexClient } from '@/lib/knex-client';
 import type { Translation, CreateTranslationData, UpdateTranslationData } from '@/types';
 
 /**
@@ -15,23 +15,14 @@ export async function getTranslationsByLocale(
   localeId: string,
   isPublished: boolean = false
 ): Promise<Translation[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('translations')
+  const data = await db('translations')
     .select('*')
-    .eq('locale_id', localeId)
-    .eq('is_published', isPublished)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: true });
-
-  if (error) {
-    throw new Error(`Failed to fetch translations: ${error.message}`);
-  }
+    .where('locale_id', localeId)
+    .where('is_published', isPublished)
+    .whereNull('deleted_at')
+    .orderBy('created_at', 'asc');
 
   return data || [];
 }
@@ -44,24 +35,15 @@ export async function getTranslationsBySource(
   sourceId: string,
   isPublished: boolean = false
 ): Promise<Translation[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('translations')
+  const data = await db('translations')
     .select('*')
-    .eq('source_type', sourceType)
-    .eq('source_id', sourceId)
-    .eq('is_published', isPublished)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: true });
-
-  if (error) {
-    throw new Error(`Failed to fetch translations: ${error.message}`);
-  }
+    .where('source_type', sourceType)
+    .where('source_id', sourceId)
+    .where('is_published', isPublished)
+    .whereNull('deleted_at')
+    .orderBy('created_at', 'asc');
 
   return data || [];
 }
@@ -73,28 +55,16 @@ export async function getTranslationById(
   id: string,
   isPublished: boolean = false
 ): Promise<Translation | null> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('translations')
+  const data = await db('translations')
     .select('*')
-    .eq('id', id)
-    .eq('is_published', isPublished)
-    .is('deleted_at', null)
-    .single();
+    .where('id', id)
+    .where('is_published', isPublished)
+    .whereNull('deleted_at')
+    .first();
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null; // Not found
-    }
-    throw new Error(`Failed to fetch translation: ${error.message}`);
-  }
-
-  return data;
+  return data || null;
 }
 
 /**
@@ -107,31 +77,19 @@ export async function getTranslationByKey(
   contentKey: string,
   isPublished: boolean = false
 ): Promise<Translation | null> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('translations')
+  const data = await db('translations')
     .select('*')
-    .eq('locale_id', localeId)
-    .eq('source_type', sourceType)
-    .eq('source_id', sourceId)
-    .eq('content_key', contentKey)
-    .eq('is_published', isPublished)
-    .is('deleted_at', null)
-    .single();
+    .where('locale_id', localeId)
+    .where('source_type', sourceType)
+    .where('source_id', sourceId)
+    .where('content_key', contentKey)
+    .where('is_published', isPublished)
+    .whereNull('deleted_at')
+    .first();
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null; // Not found
-    }
-    throw new Error(`Failed to fetch translation: ${error.message}`);
-  }
-
-  return data;
+  return data || null;
 }
 
 /**
@@ -141,36 +99,23 @@ export async function getTranslationByKey(
 export async function createTranslation(
   translationData: CreateTranslationData
 ): Promise<Translation> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('translations')
-    .upsert(
-      {
-        locale_id: translationData.locale_id,
-        source_type: translationData.source_type,
-        source_id: translationData.source_id,
-        content_key: translationData.content_key,
-        content_type: translationData.content_type,
-        content_value: translationData.content_value,
-        is_completed: translationData.is_completed ?? false,
-        is_published: false,
-        deleted_at: null, // Restore if previously deleted
-      },
-      {
-        onConflict: 'locale_id,source_type,source_id,content_key,is_published',
-      }
-    )
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to create translation: ${error.message}`);
-  }
+  const [data] = await db('translations')
+    .insert({
+      locale_id: translationData.locale_id,
+      source_type: translationData.source_type,
+      source_id: translationData.source_id,
+      content_key: translationData.content_key,
+      content_type: translationData.content_type,
+      content_value: translationData.content_value,
+      is_completed: translationData.is_completed ?? false,
+      is_published: false,
+      deleted_at: null,
+    })
+    .onConflict(['locale_id', 'source_type', 'source_id', 'content_key', 'is_published'])
+    .merge()
+    .returning('*');
 
   return data;
 }
@@ -182,27 +127,17 @@ export async function updateTranslation(
   id: string,
   updates: UpdateTranslationData
 ): Promise<Translation> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('translations')
+  const [data] = await db('translations')
+    .where('id', id)
+    .where('is_published', false)
     .update({
       ...updates,
-      deleted_at: null, // Restore if previously deleted
+      deleted_at: null,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', id)
-    .eq('is_published', false)
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to update translation: ${error.message}`);
-  }
+    .returning('*');
 
   return data;
 }
@@ -211,21 +146,12 @@ export async function updateTranslation(
  * Delete a translation (soft delete - sets deleted_at timestamp)
  */
 export async function deleteTranslation(id: string): Promise<void> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { error } = await client
-    .from('translations')
-    .update({ deleted_at: new Date().toISOString() })
-    .eq('id', id)
-    .eq('is_published', false);
-
-  if (error) {
-    throw new Error(`Failed to delete translation: ${error.message}`);
-  }
+  await db('translations')
+    .where('id', id)
+    .where('is_published', false)
+    .update({ deleted_at: new Date().toISOString() });
 }
 
 /**
@@ -241,11 +167,7 @@ export async function deleteTranslationsInBulk(
   sourceIds: string | string[],
   contentKeys?: string[]
 ): Promise<void> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const db = await getKnexClient();
 
   // Normalize sourceIds to array
   const sourceIdArray = Array.isArray(sourceIds) ? sourceIds : [sourceIds];
@@ -261,23 +183,17 @@ export async function deleteTranslationsInBulk(
   }
 
   // Build the base query
-  let query = client
-    .from('translations')
-    .update({ deleted_at: new Date().toISOString() })
-    .eq('source_type', sourceType)
-    .in('source_id', sourceIdArray)
-    .eq('is_published', false);
+  let query = db('translations')
+    .where('source_type', sourceType)
+    .whereIn('source_id', sourceIdArray)
+    .where('is_published', false);
 
   // Add content_key filter if specific keys provided
   if (contentKeys !== undefined) {
-    query = query.in('content_key', contentKeys);
+    query = query.whereIn('content_key', contentKeys);
   }
 
-  const { error } = await query;
-
-  if (error) {
-    throw new Error(`Failed to delete translations: ${error.message}`);
-  }
+  await query.update({ deleted_at: new Date().toISOString() });
 }
 
 /**
@@ -288,31 +204,22 @@ export async function markTranslationsIncomplete(
   sourceId: string,
   contentKeys: string[]
 ): Promise<void> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const db = await getKnexClient();
 
   if (contentKeys.length === 0) {
-    return; // Nothing to update
+    return;
   }
 
-  const { error } = await client
-    .from('translations')
+  await db('translations')
+    .where('source_type', sourceType)
+    .where('source_id', sourceId)
+    .whereIn('content_key', contentKeys)
+    .where('is_published', false)
+    .whereNull('deleted_at')
     .update({
       is_completed: false,
       updated_at: new Date().toISOString(),
-    })
-    .eq('source_type', sourceType)
-    .eq('source_id', sourceId)
-    .in('content_key', contentKeys)
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (error) {
-    throw new Error(`Failed to mark translations as incomplete: ${error.message}`);
-  }
+    });
 }
 
 /**
@@ -322,11 +229,7 @@ export async function markTranslationsIncomplete(
 export async function upsertTranslations(
   translations: CreateTranslationData[]
 ): Promise<Translation[]> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const db = await getKnexClient();
 
   const translationsToUpsert = translations.map((t) => ({
     locale_id: t.locale_id,
@@ -336,19 +239,14 @@ export async function upsertTranslations(
     content_type: t.content_type,
     content_value: t.content_value,
     is_published: false,
-    deleted_at: null, // Restore if previously deleted
+    deleted_at: null,
   }));
 
-  const { data, error } = await client
-    .from('translations')
-    .upsert(translationsToUpsert, {
-      onConflict: 'locale_id,source_type,source_id,content_key,is_published',
-    })
-    .select();
-
-  if (error) {
-    throw new Error(`Failed to upsert translations: ${error.message}`);
-  }
+  const data = await db('translations')
+    .insert(translationsToUpsert)
+    .onConflict(['locale_id', 'source_type', 'source_id', 'content_key', 'is_published'])
+    .merge()
+    .returning('*');
 
   return data || [];
 }

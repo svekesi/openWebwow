@@ -9,7 +9,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { createBrowserClient } from '@/lib/supabase-browser';
+// Supabase auth removed - invite flow handled via fetch API
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -45,53 +45,33 @@ export default function AcceptInvitePage() {
   useEffect(() => {
     const verifyInvite = async () => {
       try {
-        const supabase = await createBrowserClient();
-
-        if (!supabase) {
-          setError('Application not configured. Please contact the administrator.');
-          setVerifying(false);
-          return;
-        }
-
-        // Get hash parameters from URL (Supabase sends token in hash)
         const hashParams = new URLSearchParams(window.location.hash.substring(1));
         const accessToken = hashParams.get('access_token');
         const refreshToken = hashParams.get('refresh_token');
         const type = hashParams.get('type');
 
-        // Check if this is an invite flow
         if (type === 'invite' && accessToken && refreshToken) {
-          // Set the session with the tokens from the URL
-          const { data, error: sessionError } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
+          const response = await fetch('/ycode/api/auth/verify-invite', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ access_token: accessToken, refresh_token: refreshToken }),
           });
 
-          if (sessionError) {
-            console.error('Session error:', sessionError);
+          if (!response.ok) {
             setError('Invalid or expired invitation link. Please request a new invite.');
             setVerifying(false);
             return;
           }
 
-          if (data.user) {
-            setUserEmail(data.user.email || null);
+          const data = await response.json();
+          if (data.email) {
+            setUserEmail(data.email);
           }
 
           setVerifying(false);
           return;
         }
 
-        // Check if user is already logged in (maybe clicked link while logged in)
-        const { data: { session } } = await supabase.auth.getSession();
-
-        if (session?.user) {
-          // User is already authenticated, redirect to app
-          router.push('/ycode');
-          return;
-        }
-
-        // No valid token found
         setError('Invalid invitation link. Please check your email for the correct link or request a new invite.');
         setVerifying(false);
       } catch (err) {
@@ -127,26 +107,19 @@ export default function AcceptInvitePage() {
     setLoading(true);
 
     try {
-      const supabase = await createBrowserClient();
-
-      if (!supabase) {
-        setError('Application not configured');
-        setLoading(false);
-        return;
-      }
-
-      // Update the user's password
-      const { error: updateError } = await supabase.auth.updateUser({
-        password: password,
+      const response = await fetch('/ycode/api/auth/set-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
       });
 
-      if (updateError) {
-        setError(updateError.message);
+      if (!response.ok) {
+        const data = await response.json();
+        setError(data.error || 'Failed to set password');
         setLoading(false);
         return;
       }
 
-      // Success! Redirect to the app
       router.push('/ycode');
     } catch (err) {
       console.error('Error setting password:', err);

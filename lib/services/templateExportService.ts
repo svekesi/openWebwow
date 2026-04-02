@@ -1,6 +1,5 @@
 import { getKnexClient, closeKnexClient, testKnexConnection } from '../knex-client';
-import { getSupabaseAdmin } from '@/lib/supabase-server';
-import { STORAGE_BUCKET } from '@/lib/asset-constants';
+import { readFile } from '@/lib/local-storage';
 import { YCODE_EXTERNAL_API_URL } from '@/lib/config';
 
 // API key for uploading templates to the shared template service
@@ -422,22 +421,14 @@ export async function collectTemplateAssets(): Promise<
     mimeType: string;
   }>
   > {
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    console.error('[collectTemplateAssets] Supabase not configured');
-    return [];
-  }
+  const knex = await getKnexClient();
 
-  // Get assets that have a storage_path (user uploads, not inline SVGs)
-  // and are not from other templates
-  const { data: assets, error } = await client
-    .from('assets')
+  const assets = await knex('assets')
     .select('*')
-    .not('storage_path', 'is', null)
-    .not('source', 'like', 'template:%');
+    .whereNotNull('storage_path')
+    .whereNot('source', 'like', 'template:%');
 
-  if (error || !assets) {
-    console.error('[collectTemplateAssets] Failed to fetch assets:', error);
+  if (!assets || assets.length === 0) {
     return [];
   }
 
@@ -449,23 +440,18 @@ export async function collectTemplateAssets(): Promise<
 
   for (const asset of assets) {
     try {
-      // Download from Supabase Storage
-      const { data, error: downloadError } = await client.storage
-        .from(STORAGE_BUCKET)
-        .download(asset.storage_path);
+      const buffer = await readFile(asset.storage_path);
 
-      if (downloadError || !data) {
+      if (!buffer) {
         console.warn(
-          `[collectTemplateAssets] Failed to download ${asset.filename}:`,
-          downloadError
+          `[collectTemplateAssets] Failed to read ${asset.filename}`
         );
         continue;
       }
 
-      const buffer = await data.arrayBuffer();
       results.push({
         filename: asset.filename,
-        base64: Buffer.from(buffer).toString('base64'),
+        base64: buffer.toString('base64'),
         mimeType: asset.mime_type || 'application/octet-stream',
       });
     } catch (err) {

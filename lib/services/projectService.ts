@@ -8,8 +8,8 @@ import { scryptSync, randomBytes, createCipheriv, createDecipheriv } from 'crypt
 import { gzipSync, gunzipSync } from 'zlib';
 import type { Knex } from 'knex';
 import { getKnexClient, closeKnexClient, testKnexConnection } from '../knex-client';
-import { getSupabaseAdmin } from '@/lib/supabase-server';
-import { STORAGE_BUCKET, STORAGE_FOLDERS } from '@/lib/asset-constants';
+import { STORAGE_FOLDERS } from '@/lib/asset-constants';
+import { readFile, uploadFile, getPublicUrl } from '@/lib/local-storage';
 import { migrations } from '../migrations-loader';
 
 /**
@@ -405,13 +405,10 @@ export function generateStoragePath(originalPath: string): string {
 
 // ─── Asset File Helpers ──────────────────────────────────────────────
 
-/** Collect asset files from Supabase Storage as base64 (parallel). */
+/** Collect asset files from local storage as base64 (parallel). */
 export async function collectAssetFiles(
   assetRows: Record<string, unknown>[]
 ): Promise<ExportFile[]> {
-  const client = await getSupabaseAdmin();
-  if (!client) return [];
-
   const storagePaths = assetRows
     .map(r => r.storage_path as string | null)
     .filter((p): p is string => !!p);
@@ -421,20 +418,17 @@ export async function collectAssetFiles(
 
   return processInParallel(uniquePaths, async (storagePath): Promise<ExportFile | null> => {
     try {
-      const { data, error } = await client.storage
-        .from(STORAGE_BUCKET)
-        .download(storagePath);
+      const buffer = await readFile(storagePath);
 
-      if (error || !data) {
-        console.warn(`[collectAssetFiles] Failed to download ${storagePath}:`, error);
+      if (!buffer) {
+        console.warn(`[collectAssetFiles] Failed to read ${storagePath}`);
         return null;
       }
 
-      const buffer = await data.arrayBuffer();
       return {
         storagePath,
-        base64: Buffer.from(buffer).toString('base64'),
-        mimeType: data.type || 'application/octet-stream',
+        base64: buffer.toString('base64'),
+        mimeType: 'application/octet-stream',
       };
     } catch (err) {
       console.warn(`[collectAssetFiles] Error processing ${storagePath}:`, err);
@@ -443,37 +437,22 @@ export async function collectAssetFiles(
   });
 }
 
-/** Upload asset files to Supabase Storage and batch-update DB records. */
+/** Upload asset files to local storage and batch-update DB records. */
 export async function restoreAssetFiles(
   files: ExportFile[],
   db: Knex
 ): Promise<void> {
-  const client = await getSupabaseAdmin();
-  if (!client || files.length === 0) return;
+  if (files.length === 0) return;
 
   const pathUpdates = await processInParallel(files, async (file): Promise<{ oldPath: string; newPath: string; publicUrl: string } | null> => {
     try {
       const buffer = Buffer.from(file.base64, 'base64');
       const newPath = generateStoragePath(file.storagePath);
 
-      const { data, error } = await client.storage
-        .from(STORAGE_BUCKET)
-        .upload(newPath, buffer, {
-          contentType: file.mimeType,
-          cacheControl: '3600',
-          upsert: false,
-        });
+      await uploadFile(newPath, buffer);
+      const publicUrl = getPublicUrl(newPath);
 
-      if (error || !data) {
-        console.warn(`[restoreAssetFiles] Failed to upload ${file.storagePath}:`, error);
-        return null;
-      }
-
-      const { data: urlData } = client.storage
-        .from(STORAGE_BUCKET)
-        .getPublicUrl(data.path);
-
-      return { oldPath: file.storagePath, newPath: data.path, publicUrl: urlData.publicUrl };
+      return { oldPath: file.storagePath, newPath, publicUrl };
     } catch (err) {
       console.warn(`[restoreAssetFiles] Error uploading ${file.storagePath}:`, err);
       return null;
@@ -482,9 +461,8 @@ export async function restoreAssetFiles(
 
   if (pathUpdates.length === 0) return;
 
-  // Batch DB updates using a single raw query with CASE expressions
-  const whenStorage = pathUpdates.map((_, i) => `WHEN ? THEN ?`).join(' ');
-  const whenUrl = pathUpdates.map((_, i) => `WHEN ? THEN ?`).join(' ');
+  const whenStorage = pathUpdates.map(() => `WHEN ? THEN ?`).join(' ');
+  const whenUrl = pathUpdates.map(() => `WHEN ? THEN ?`).join(' ');
   const oldPaths = pathUpdates.map(u => u.oldPath);
   const storageBindings = pathUpdates.flatMap(u => [u.oldPath, u.newPath]);
   const urlBindings = pathUpdates.flatMap(u => [u.oldPath, u.publicUrl]);

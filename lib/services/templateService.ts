@@ -1,6 +1,6 @@
 import { getKnexClient, closeKnexClient, testKnexConnection } from '../knex-client';
-import { getSupabaseAdmin } from '@/lib/supabase-server';
-import { STORAGE_BUCKET, STORAGE_FOLDERS } from '@/lib/asset-constants';
+import { STORAGE_FOLDERS } from '@/lib/asset-constants';
+import { uploadFile, getPublicUrl } from '@/lib/local-storage';
 import { migrations } from '../migrations-loader';
 import { YCODE_EXTERNAL_API_URL } from '@/lib/config';
 
@@ -122,13 +122,6 @@ export async function getTemplate(id: string): Promise<TemplateDetails | null> {
  * @param knex - Knex transaction or client
  */
 async function copyTemplateAssetsToUserStorage(knex: ReturnType<typeof getKnexClient> extends Promise<infer T> ? T : never): Promise<void> {
-  const supabase = await getSupabaseAdmin();
-  if (!supabase) {
-    console.warn('[copyTemplateAssets] Supabase not configured, skipping asset copy');
-    return;
-  }
-
-  // Find all template assets that need to be copied (have public_url but no storage_path)
   const templateAssets = await knex('assets')
     .whereNotNull('public_url')
     .whereNull('storage_path')
@@ -141,9 +134,8 @@ async function copyTemplateAssetsToUserStorage(knex: ReturnType<typeof getKnexCl
 
   for (const asset of templateAssets) {
     try {
-      // Download from template-service CDN with timeout
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      const timeout = setTimeout(() => controller.abort(), 30000);
 
       let response: Response;
       try {
@@ -163,37 +155,19 @@ async function copyTemplateAssetsToUserStorage(knex: ReturnType<typeof getKnexCl
       const blob = await response.blob();
       const buffer = Buffer.from(await blob.arrayBuffer());
 
-      // Generate unique storage path
       const timestamp = Date.now();
       const random = Math.random().toString(36).substring(2, 15);
       const extension = asset.filename.split('.').pop() || 'bin';
       const storagePath = `${STORAGE_FOLDERS.WEBSITE}/${timestamp}-${random}.${extension}`;
 
-      // Upload to user's storage
-      const { data, error } = await supabase.storage
-        .from(STORAGE_BUCKET)
-        .upload(storagePath, buffer, {
-          contentType: asset.mime_type || 'application/octet-stream',
-          cacheControl: '3600',
-          upsert: false,
-        });
+      await uploadFile(storagePath, buffer);
+      const publicUrl = getPublicUrl(storagePath);
 
-      if (error) {
-        console.warn(`[copyTemplateAssets] Failed to upload ${asset.filename}:`, error);
-        continue;
-      }
-
-      // Get new public URL
-      const { data: urlData } = supabase.storage
-        .from(STORAGE_BUCKET)
-        .getPublicUrl(data.path);
-
-      // Update asset record with new storage path and URL
       await knex('assets')
         .where('id', asset.id)
         .update({
-          storage_path: data.path,
-          public_url: urlData.publicUrl,
+          storage_path: storagePath,
+          public_url: publicUrl,
         });
     } catch (err) {
       console.warn(`[copyTemplateAssets] Error copying ${asset.filename}:`, err);

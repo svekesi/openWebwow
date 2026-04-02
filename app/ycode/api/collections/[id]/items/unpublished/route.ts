@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getItemsWithValues } from '@/lib/repositories/collectionItemRepository';
 import { noCache } from '@/lib/api-response';
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getKnexClient } from '@/lib/knex-client';
 
 // Disable caching for this route
 export const dynamic = 'force-dynamic';
@@ -23,13 +23,8 @@ export async function GET(
     const { id } = await params;
     const collectionId = id; // UUID string, no parsing needed
 
-    const client = await getSupabaseAdmin();
+    const db = await getKnexClient();
 
-    if (!client) {
-      return noCache({ error: 'Supabase not configured' }, 500);
-    }
-
-    // Get all items including deleted ones (no pagination for unpublished check)
     const { items } = await getItemsWithValues(
       collectionId,
       false, // is_published (draft items and values)
@@ -42,19 +37,12 @@ export async function GET(
     for (const item of items) {
       // If item is deleted, check if it has published values
       if (item.deleted_at) {
-        // Get published values to check if item was ever published
-        const { data: publishedValues, error: publishedCheckError } = await client
-          .from('collection_item_values')
+        const publishedValues = await db('collection_item_values')
           .select('field_id')
-          .eq('item_id', item.id)
-          .eq('is_published', true)
-          .is('deleted_at', null)
+          .where('item_id', item.id)
+          .where('is_published', true)
+          .whereNull('deleted_at')
           .limit(1);
-
-        if (publishedCheckError) {
-          console.error(`Error checking published values for item ${item.id}:`, publishedCheckError);
-          continue;
-        }
 
         // Only show as "deleted" if there are published values to remove
         if (publishedValues && publishedValues.length > 0) {
@@ -66,11 +54,10 @@ export async function GET(
 
       // If item is not publishable, check if it has a published version that needs removal
       if (!item.is_publishable) {
-        const { data: publishedItem } = await client
-          .from('collection_items')
+        const publishedItem = await db('collection_items')
           .select('id')
-          .eq('id', item.id)
-          .eq('is_published', true)
+          .where('id', item.id)
+          .where('is_published', true)
           .limit(1);
 
         if (publishedItem && publishedItem.length > 0) {
@@ -79,31 +66,17 @@ export async function GET(
         continue;
       }
 
-      // Get draft values
-      const { data: draftValues, error: draftError } = await client
-        .from('collection_item_values')
-        .select('field_id, value')
-        .eq('item_id', item.id)
-        .eq('is_published', false)
-        .is('deleted_at', null);
+      const draftValues = await db('collection_item_values')
+        .select('field_id', 'value')
+        .where('item_id', item.id)
+        .where('is_published', false)
+        .whereNull('deleted_at');
 
-      if (draftError) {
-        console.error(`Error fetching draft values for item ${item.id}:`, draftError);
-        continue;
-      }
-
-      // Get published values
-      const { data: publishedValues, error: publishedError } = await client
-        .from('collection_item_values')
-        .select('field_id, value')
-        .eq('item_id', item.id)
-        .eq('is_published', true)
-        .is('deleted_at', null);
-
-      if (publishedError) {
-        console.error(`Error fetching published values for item ${item.id}:`, publishedError);
-        continue;
-      }
+      const publishedValues = await db('collection_item_values')
+        .select('field_id', 'value')
+        .where('item_id', item.id)
+        .where('is_published', true)
+        .whereNull('deleted_at');
 
       // If no published values, item is new
       if (!publishedValues || publishedValues.length === 0) {

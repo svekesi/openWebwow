@@ -4,7 +4,8 @@
  * Data access layer for application settings stored in the database
  */
 
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getKnexClient } from '@/lib/knex-client';
+import { jsonb } from '@/lib/knex-helpers';
 import type { Setting } from '@/types';
 
 /**
@@ -13,19 +14,11 @@ import type { Setting } from '@/types';
  * @returns Promise resolving to all settings
  */
 export async function getAllSettings(): Promise<Setting[]> {
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    throw new Error('Failed to initialize Supabase client');
-  }
+  const db = await getKnexClient();
 
-  const { data, error } = await client
-    .from('settings')
+  const data = await db('settings')
     .select('*')
-    .order('key', { ascending: true });
-
-  if (error) {
-    throw new Error(`Failed to fetch settings: ${error.message}`);
-  }
+    .orderBy('key', 'asc');
 
   return data || [];
 }
@@ -37,24 +30,12 @@ export async function getAllSettings(): Promise<Setting[]> {
  * @returns Promise resolving to the setting value or null if not found
  */
 export async function getSettingByKey(key: string): Promise<any | null> {
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    throw new Error('Failed to initialize Supabase client');
-  }
+  const db = await getKnexClient();
 
-  const { data, error } = await client
-    .from('settings')
+  const data = await db('settings')
     .select('value')
-    .eq('key', key)
-    .single();
-
-  if (error) {
-    if (error.code === 'PGRST116') {
-      // Not found
-      return null;
-    }
-    throw new Error(`Failed to fetch setting: ${error.message}`);
-  }
+    .where('key', key)
+    .first();
 
   return data?.value || null;
 }
@@ -70,19 +51,11 @@ export async function getSettingsByKeys(keys: string[]): Promise<Record<string, 
     return {};
   }
 
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    throw new Error('Failed to initialize Supabase client');
-  }
+  const db = await getKnexClient();
 
-  const { data, error } = await client
-    .from('settings')
-    .select('key, value')
-    .in('key', keys);
-
-  if (error) {
-    throw new Error(`Failed to fetch settings: ${error.message}`);
-  }
+  const data = await db('settings')
+    .select('key', 'value')
+    .whereIn('key', keys);
 
   const result: Record<string, any> = {};
   for (const setting of data || []) {
@@ -100,26 +73,17 @@ export async function getSettingsByKeys(keys: string[]): Promise<Record<string, 
  * @returns Promise resolving to the created/updated setting
  */
 export async function setSetting(key: string, value: any): Promise<Setting> {
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    throw new Error('Failed to initialize Supabase client');
-  }
+  const db = await getKnexClient();
 
-  const { data, error } = await client
-    .from('settings')
-    .upsert({
+  const [data] = await db('settings')
+    .insert({
       key,
-      value,
+      value: jsonb(value),
       updated_at: new Date().toISOString(),
-    }, {
-      onConflict: 'key',
     })
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to set setting: ${error.message}`);
-  }
+    .onConflict('key')
+    .merge()
+    .returning('*');
 
   return data;
 }
@@ -137,10 +101,7 @@ export async function setSettings(settings: Record<string, any>): Promise<number
     return 0;
   }
 
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    throw new Error('Failed to initialize Supabase client');
-  }
+  const db = await getKnexClient();
 
   // Separate entries: null/undefined values should be deleted, others upserted
   const toUpsert: [string, any][] = [];
@@ -156,14 +117,9 @@ export async function setSettings(settings: Record<string, any>): Promise<number
 
   // Delete settings with null values
   if (toDelete.length > 0) {
-    const { error: deleteError } = await client
-      .from('settings')
-      .delete()
-      .in('key', toDelete);
-
-    if (deleteError) {
-      throw new Error(`Failed to delete settings: ${deleteError.message}`);
-    }
+    await db('settings')
+      .whereIn('key', toDelete)
+      .delete();
   }
 
   // Upsert settings with non-null values
@@ -171,19 +127,14 @@ export async function setSettings(settings: Record<string, any>): Promise<number
     const now = new Date().toISOString();
     const records = toUpsert.map(([key, value]) => ({
       key,
-      value,
+      value: jsonb(value),
       updated_at: now,
     }));
 
-    const { error } = await client
-      .from('settings')
-      .upsert(records, {
-        onConflict: 'key',
-      });
-
-    if (error) {
-      throw new Error(`Failed to set settings: ${error.message}`);
-    }
+    await db('settings')
+      .insert(records)
+      .onConflict('key')
+      .merge();
   }
 
   return entries.length;

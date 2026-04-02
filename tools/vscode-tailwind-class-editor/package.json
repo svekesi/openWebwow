@@ -1,0 +1,70 @@
+{
+  "name": "ycode-tailwind-class-editor",
+  "displayName": "YCode Tailwind Class Editor",
+  "description": "Sidebar editor for className/class Tailwind utilities with live preview",
+  "version": "0.0.1",
+  "publisher": "ycode-local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.92.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:ycodeCssEditor.sidebar",
+    "onCommand:ycodeCssEditor.focus"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ycodeCssEditor.focus",
+        "title": "YCode: Focus Class Editor"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ycodeCssEditor",
+          "title": "YCode CSS",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "ycodeCssEditor": [
+        {
+          "id": "ycodeCssEditor.sidebar",
+          "name": "Class Editor",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "YCode CSS Editor",
+      "properties": {
+        "ycodeCssEditor.previewUrl": {
+          "type": "string",
+          "default": "http://localhost:3000",
+          "description": "URL used in the live preview iframe."
+        },
+        "ycodeCssEditor.controlsUrl": {
+          "type": "string",
+          "default": "http://localhost:3002",
+          "description": "Base URL used for the embedded YCode controls frame."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "watch": "tsc -w -p .",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.92.0",
+    "@vscode/vsce": "^3.6.2",
+    "typescript": "^5.8.3"
+  }
+}

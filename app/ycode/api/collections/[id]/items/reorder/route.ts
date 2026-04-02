@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getKnexClient } from '@/lib/knex-client';
 import { noCache } from '@/lib/api-response';
 
 // Disable caching for this route
@@ -40,32 +40,15 @@ export async function POST(
       }
     }
     
-    const client = await getSupabaseAdmin();
+    const db = await getKnexClient();
     
-    if (!client) {
-      return noCache({ error: 'Supabase not configured' }, 500);
-    }
-    
-    // Update manual_order on draft rows only so publish detects the change
-    const updatePromises = updates.map(({ id, manual_order }) =>
-      client
-        .from('collection_items')
-        .update({
-          manual_order,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', id)
-        .eq('collection_id', collectionId)
-        .eq('is_published', false)
-    );
-    
-    const results = await Promise.all(updatePromises);
-    
-    // Check for errors
-    const errors = results.filter(r => r.error);
-    if (errors.length > 0) {
-      console.error('Errors updating manual_order:', errors);
-      return noCache({ error: 'Failed to update some items' }, 500);
+    const now = new Date().toISOString();
+    for (const { id, manual_order } of updates) {
+      await db('collection_items')
+        .where('id', id)
+        .where('collection_id', collectionId)
+        .where('is_published', false)
+        .update({ manual_order, updated_at: now });
     }
     
     return noCache({ data: { updated: updates.length } }, 200);

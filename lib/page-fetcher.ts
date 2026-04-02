@@ -1,5 +1,5 @@
 import { cache } from 'react';
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getKnexClient } from '@/lib/knex-client';
 import { buildSlugPath, buildDynamicPageUrl, buildLocalizedSlugPath, buildLocalizedDynamicPageUrl, detectLocaleFromPath, matchPageWithTranslatedSlugs, matchDynamicPageWithTranslatedSlugs } from '@/lib/page-utils';
 import { getItemWithValues, getItemsWithValues, getItemIdsByFieldValue } from '@/lib/repositories/collectionItemRepository';
 import { getFieldsByCollectionId } from '@/lib/repositories/collectionFieldRepository';
@@ -93,32 +93,24 @@ export async function loadTranslationsForLocale(
   tenantId?: string
 ): Promise<{ locale: Locale | null; translations: Record<string, Translation> }> {
   try {
-    const supabase = await getSupabaseAdmin(tenantId);
+    const db = await getKnexClient();
 
-    if (!supabase) {
-      return { locale: null, translations: {} };
-    }
-
-    // Find the locale by code
-    const { data: locale } = await supabase
-      .from('locales')
+    const locale = await db('locales')
       .select('*')
-      .eq('code', localeCode)
-      .eq('is_published', isPublished)
-      .is('deleted_at', null)
-      .single();
+      .where('code', localeCode)
+      .where('is_published', isPublished)
+      .whereNull('deleted_at')
+      .first();
 
     if (!locale) {
       return { locale: null, translations: {} };
     }
 
-    // Fetch all translations for this locale
-    const { data: translations } = await supabase
-      .from('translations')
+    const translations = await db('translations')
       .select('*')
-      .eq('locale_id', locale.id)
-      .eq('is_published', isPublished)
-      .is('deleted_at', null);
+      .where('locale_id', locale.id)
+      .where('is_published', isPublished)
+      .whereNull('deleted_at');
 
     if (!translations) {
       return { locale, translations: {} };
@@ -159,41 +151,29 @@ async function getCollectionItemBySlug(
   tenantId?: string
 ): Promise<CollectionItemWithValues | null> {
   try {
-    const supabase = await getSupabaseAdmin(tenantId);
+    const db = await getKnexClient();
 
-    if (!supabase) {
-      return null;
-    }
-
-    // If locale and translations are provided, try to find item by translated slug first
     if (locale && translations && collectionFields) {
       const slugField = collectionFields.find(f => f.id === slugFieldId);
 
       if (slugField) {
-        // Build content_key for the slug field
         const contentKey = slugField.key
           ? `field:key:${slugField.key}`
           : `field:id:${slugField.id}`;
 
-        // Search through translations to find which item has this translated slug
         for (const [translationKey, translation] of Object.entries(translations)) {
-          // Translation key format: cms:{itemId}:{contentKey}
           if (translation.content_value === slugValue && translationKey.endsWith(contentKey)) {
-            // Extract item ID from translation key
             const itemId = translation.source_id;
 
-            // Verify this item belongs to the correct collection
-            const { data: item, error: itemError } = await supabase
-              .from('collection_items')
+            const item = await db('collection_items')
               .select('*')
-              .eq('id', itemId)
-              .eq('collection_id', collectionId)
-              .eq('is_published', isPublished)
-              .is('deleted_at', null)
-              .single();
+              .where('id', itemId)
+              .where('collection_id', collectionId)
+              .where('is_published', isPublished)
+              .whereNull('deleted_at')
+              .first();
 
-            if (!itemError && item) {
-              // Found the item via translation - return it with all values
+            if (item) {
               return await getItemWithValues(item.id, isPublished);
             }
           }
@@ -201,36 +181,30 @@ async function getCollectionItemBySlug(
       }
     }
 
-    // Fall back to original slug lookup (no translation or translation not found)
-    const { data: valueData, error: valueError } = await supabase
-      .from('collection_item_values')
+    const valueData = await db('collection_item_values')
       .select('item_id')
-      .eq('field_id', slugFieldId)
-      .eq('value', slugValue)
-      .eq('is_published', isPublished)
-      .is('deleted_at', null)
-      .limit(1)
-      .single();
+      .where('field_id', slugFieldId)
+      .where('value', slugValue)
+      .where('is_published', isPublished)
+      .whereNull('deleted_at')
+      .first();
 
-    if (valueError || !valueData) {
+    if (!valueData) {
       return null;
     }
 
-    // Verify the item belongs to the correct collection
-    const { data: item, error: itemError } = await supabase
-      .from('collection_items')
+    const item = await db('collection_items')
       .select('*')
-      .eq('id', valueData.item_id)
-      .eq('collection_id', collectionId)
-      .eq('is_published', isPublished)
-      .is('deleted_at', null)
-      .single();
+      .where('id', valueData.item_id)
+      .where('collection_id', collectionId)
+      .where('is_published', isPublished)
+      .whereNull('deleted_at')
+      .first();
 
-    if (itemError || !item) {
+    if (!item) {
       return null;
     }
 
-    // Fetch the item with all its values
     return await getItemWithValues(item.id, isPublished);
   } catch (error) {
     console.error('Failed to fetch collection item by slug:', error);
@@ -254,27 +228,18 @@ export const fetchPageByPath = cache(async function fetchPageByPath(
   tenantId?: string
 ): Promise<PageData | null> {
   try {
-    const supabase = await getSupabaseAdmin(tenantId);
+    const db = await getKnexClient();
 
-    if (!supabase) {
-      console.error('Supabase not configured');
-      return null;
-    }
-
-    // Get all active locales from the database
-    const { data: availableLocales } = await supabase
-      .from('locales')
+    const availableLocales = await db('locales')
       .select('*')
-      .eq('is_published', isPublished)
-      .is('deleted_at', null);
+      .where('is_published', isPublished)
+      .whereNull('deleted_at');
 
     const validLocaleCodes = availableLocales?.map(l => l.code) || [];
 
-    // Detect locale from URL path using database locale codes
     const localeDetection = detectLocaleFromPath(slugPath, validLocaleCodes);
     const pathWithoutLocale = localeDetection?.remainingPath ?? slugPath;
 
-    // Load translations if locale detected
     let translations: Record<string, Translation> | undefined;
     let detectedLocale: Locale | null = null;
 
@@ -288,11 +253,10 @@ export const fetchPageByPath = cache(async function fetchPageByPath(
       translations = trans;
     }
 
-    // Fetch pages, folders, and components in parallel
-    const [{ data: pages }, { data: folders }, components] = await Promise.all([
-      supabase.from('pages').select('*').eq('is_published', isPublished).is('deleted_at', null),
-      supabase.from('page_folders').select('*').eq('is_published', isPublished).is('deleted_at', null),
-      fetchComponents(supabase, isPublished),
+    const [pages, folders, components] = await Promise.all([
+      db('pages').select('*').where('is_published', isPublished).whereNull('deleted_at'),
+      db('page_folders').select('*').where('is_published', isPublished).whereNull('deleted_at'),
+      fetchComponents(db, isPublished),
     ]);
 
     if (!pages || !folders) {
@@ -401,15 +365,14 @@ export const fetchPageByPath = cache(async function fetchPageByPath(
             matchingPage = dynamicPage;
 
             // Get layers for the dynamic page
-            const { data: pageLayers, error: layersError } = await supabase
-              .from('page_layers')
+            const pageLayers = await db('page_layers')
               .select('*')
-              .eq('page_id', matchingPage.id)
-              .eq('is_published', isPublished)
-              .is('deleted_at', null)
-              .order('created_at', { ascending: false })
-              .limit(1)
-              .single();
+              .where('page_id', matchingPage.id)
+              .where('is_published', isPublished)
+              .whereNull('deleted_at')
+              .orderBy('created_at', 'desc')
+              .first();
+            const layersError = null;
 
             if (layersError) {
               console.error(`Failed to fetch ${isPublished ? 'published' : 'draft'} layers:`, layersError);
@@ -491,15 +454,14 @@ export const fetchPageByPath = cache(async function fetchPageByPath(
 
     // Handle non-dynamic page (exact match)
     // Get layers for the matched page
-    const { data: pageLayers, error: layersError } = await supabase
-      .from('page_layers')
+    const pageLayers = await db('page_layers')
       .select('*')
-      .eq('page_id', matchingPage.id)
-      .eq('is_published', isPublished)
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+      .where('page_id', matchingPage.id)
+      .where('is_published', isPublished)
+      .whereNull('deleted_at')
+      .orderBy('created_at', 'desc')
+      .first();
+    const layersError = null;
 
     if (layersError) {
       console.error(`Failed to fetch ${isPublished ? 'published' : 'draft'} layers:`, layersError);
@@ -554,50 +516,38 @@ export async function fetchErrorPage(
   tenantId?: string
 ): Promise<PageData | null> {
   try {
-    const supabase = await getSupabaseAdmin(tenantId);
+    const db = await getKnexClient();
 
-    if (!supabase) {
-      console.error('Supabase not configured');
-      return null;
-    }
-
-    // Get all active locales from the database
-    const { data: availableLocales } = await supabase
-      .from('locales')
+    const availableLocales = await db('locales')
       .select('*')
-      .eq('is_published', isPublished)
-      .is('deleted_at', null);
+      .where('is_published', isPublished)
+      .whereNull('deleted_at');
 
-    // Get the error page
-    const { data: errorPage } = await supabase
-      .from('pages')
+    const errorPage = await db('pages')
       .select('*')
-      .eq('error_page', errorCode)
-      .eq('is_published', isPublished)
-      .is('deleted_at', null)
-      .single();
+      .where('error_page', errorCode)
+      .where('is_published', isPublished)
+      .whereNull('deleted_at')
+      .first();
 
     if (!errorPage) {
       return null;
     }
 
-    // Get layers for the error page
-    const { data: pageLayers, error: layersError } = await supabase
-      .from('page_layers')
+    const pageLayers = await db('page_layers')
       .select('*')
-      .eq('page_id', errorPage.id)
-      .eq('is_published', isPublished)
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+      .where('page_id', errorPage.id)
+      .where('is_published', isPublished)
+      .whereNull('deleted_at')
+      .orderBy('created_at', 'desc')
+      .first();
 
-    if (layersError) {
-      console.error(`Failed to fetch ${isPublished ? 'published' : 'draft'} error page layers:`, layersError);
+    if (!pageLayers) {
+      console.error(`Failed to fetch ${isPublished ? 'published' : 'draft'} error page layers`);
       return null;
     }
 
-    const components = await fetchComponents(supabase, isPublished);
+    const components = await fetchComponents(db, isPublished);
 
     // First, resolve components so collection layers inside components are available
     const layersWithComponents = resolveComponents(pageLayers?.layers || [], components);
@@ -646,21 +596,12 @@ export const fetchHomepage = cache(async function fetchHomepage(
   tenantId?: string
 ): Promise<Pick<PageData, 'page' | 'pageLayers' | 'components' | 'locale' | 'availableLocales' | 'translations'> | null> {
   try {
-    const supabase = await getSupabaseAdmin(tenantId);
+    const db = await getKnexClient();
 
-    if (!supabase) {
-      return null;
-    }
-
-    // Fetch locales, homepage, and components in parallel
-    const [
-      { data: availableLocales },
-      { data: homepage },
-      componentsResult,
-    ] = await Promise.all([
-      supabase.from('locales').select('*').eq('is_published', isPublished).is('deleted_at', null),
-      supabase.from('pages').select('*').eq('is_index', true).is('page_folder_id', null).eq('is_published', isPublished).is('deleted_at', null).limit(1).single(),
-      preloadedComponents ? Promise.resolve(preloadedComponents) : fetchComponents(supabase, isPublished),
+    const [availableLocales, homepage, componentsResult] = await Promise.all([
+      db('locales').select('*').where('is_published', isPublished).whereNull('deleted_at'),
+      db('pages').select('*').where('is_index', true).whereNull('page_folder_id').where('is_published', isPublished).whereNull('deleted_at').first(),
+      preloadedComponents ? Promise.resolve(preloadedComponents) : fetchComponents(db, isPublished),
     ]);
 
     if (!homepage) {
@@ -670,15 +611,14 @@ export const fetchHomepage = cache(async function fetchHomepage(
     const components = componentsResult;
 
     // Get layers for homepage (depends on homepage.id)
-    const { data: pageLayers, error: layersError } = await supabase
-      .from('page_layers')
+    const pageLayers = await db('page_layers')
       .select('*')
-      .eq('page_id', homepage.id)
-      .eq('is_published', isPublished)
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+      .where('page_id', homepage.id)
+      .where('is_published', isPublished)
+      .whereNull('deleted_at')
+      .orderBy('created_at', 'desc')
+      .first();
+    const layersError = null;
 
     if (layersError) {
       return null;
@@ -846,12 +786,11 @@ function injectTranslatedText(
  * @param isPublished - Whether to fetch published or draft components (defaults to false for draft)
  * @returns Array of components or empty array if fetch fails
  */
-async function fetchComponents(supabase: any, isPublished: boolean = false): Promise<Component[]> {
-  const { data: components } = await supabase
-    .from('components')
+async function fetchComponents(db: any, isPublished: boolean = false): Promise<Component[]> {
+  const components = await db('components')
     .select('*')
-    .eq('is_published', isPublished)
-    .is('deleted_at', null);
+    .where('is_published', isPublished)
+    .whereNull('deleted_at');
   return components || [];
 }
 

@@ -1,10 +1,10 @@
 /**
  * Thumbnail upload utility for component previews
- * Converts image buffers to WebP and uploads to Supabase Storage
+ * Converts image buffers to WebP and saves to local storage
  */
 
-import { getSupabaseAdmin } from '@/lib/supabase-server';
-import { STORAGE_BUCKET, STORAGE_FOLDERS } from '@/lib/asset-constants';
+import { uploadFile, deleteFile, getPublicUrl } from '@/lib/local-storage';
+import { STORAGE_FOLDERS } from '@/lib/asset-constants';
 import sharp from 'sharp';
 
 /**
@@ -20,59 +20,25 @@ export async function convertToWebP(imageBuffer: Buffer, quality: number = 85): 
 }
 
 /**
- * Upload a component thumbnail to Supabase Storage as WebP
- * Replaces existing thumbnail if present (upsert)
+ * Upload a component thumbnail to local storage as WebP
+ * Replaces existing thumbnail if present (overwrites)
  * @param componentId - Component ID used as filename
  * @param imageBuffer - Raw image buffer (PNG from html-to-image)
  * @returns Public URL of the uploaded thumbnail
  */
 export async function uploadThumbnail(componentId: string, imageBuffer: Buffer): Promise<string> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
   const webpBuffer = await convertToWebP(imageBuffer);
   const storagePath = `${STORAGE_FOLDERS.COMPONENTS}/${componentId}.webp`;
 
-  const { data, error } = await client.storage
-    .from(STORAGE_BUCKET)
-    .upload(storagePath, webpBuffer, {
-      cacheControl: '3600',
-      upsert: true,
-      contentType: 'image/webp',
-    });
-
-  if (error) {
-    throw new Error(`Failed to upload thumbnail: ${error.message}`);
-  }
-
-  const { data: urlData } = client.storage
-    .from(STORAGE_BUCKET)
-    .getPublicUrl(data.path);
-
-  return urlData.publicUrl;
+  await uploadFile(storagePath, webpBuffer);
+  return getPublicUrl(storagePath);
 }
 
 /**
- * Delete a component thumbnail from Supabase Storage
+ * Delete a component thumbnail from local storage
  * @param componentId - Component ID used as filename
  */
 export async function deleteThumbnail(componentId: string): Promise<void> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
   const storagePath = `${STORAGE_FOLDERS.COMPONENTS}/${componentId}.webp`;
-
-  const { error } = await client.storage
-    .from(STORAGE_BUCKET)
-    .remove([storagePath]);
-
-  if (error) {
-    throw new Error(`Failed to delete thumbnail: ${error.message}`);
-  }
+  await deleteFile(storagePath);
 }

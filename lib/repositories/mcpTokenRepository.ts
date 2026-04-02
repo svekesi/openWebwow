@@ -1,4 +1,4 @@
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getKnexClient } from '@/lib/knex-client';
 import { randomBytes } from 'crypto';
 
 export interface McpToken {
@@ -20,36 +20,22 @@ function generateToken(): string {
 }
 
 export async function getAllTokens(): Promise<McpToken[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('mcp_tokens')
-    .select('id, name, token_prefix, is_active, last_used_at, created_at, updated_at')
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    throw new Error(`Failed to fetch MCP tokens: ${error.message}`);
-  }
+  const data = await db('mcp_tokens')
+    .select('id', 'name', 'token_prefix', 'is_active', 'last_used_at', 'created_at', 'updated_at')
+    .orderBy('created_at', 'desc');
 
   return data || [];
 }
 
 export async function createToken(name: string): Promise<McpTokenWithPlainToken> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const db = await getKnexClient();
 
   const token = generateToken();
   const tokenPrefix = token.substring(0, 12);
 
-  const { data, error } = await client
-    .from('mcp_tokens')
+  const [data] = await db('mcp_tokens')
     .insert({
       name,
       token,
@@ -57,12 +43,7 @@ export async function createToken(name: string): Promise<McpTokenWithPlainToken>
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
-    .select('id, name, token, token_prefix, is_active, last_used_at, created_at, updated_at')
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to create MCP token: ${error.message}`);
-  }
+    .returning(['id', 'name', 'token', 'token_prefix', 'is_active', 'last_used_at', 'created_at', 'updated_at']);
 
   return data;
 }
@@ -72,64 +53,40 @@ export async function createToken(name: string): Promise<McpTokenWithPlainToken>
  * Updates last_used_at in the background.
  */
 export async function validateToken(token: string): Promise<McpToken | null> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const data = await db('mcp_tokens')
+    .select('id', 'name', 'token_prefix', 'is_active', 'last_used_at', 'created_at', 'updated_at')
+    .where('token', token)
+    .where('is_active', true)
+    .first();
 
-  const { data, error } = await client
-    .from('mcp_tokens')
-    .select('id, name, token_prefix, is_active, last_used_at, created_at, updated_at')
-    .eq('token', token)
-    .eq('is_active', true)
-    .single();
-
-  if (error || !data) {
+  if (!data) {
     return null;
   }
 
-  await client
-    .from('mcp_tokens')
-    .update({ last_used_at: new Date().toISOString() })
-    .eq('id', data.id);
+  await db('mcp_tokens')
+    .where('id', data.id)
+    .update({ last_used_at: new Date().toISOString() });
 
   return data;
 }
 
 export async function deleteToken(id: string): Promise<void> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { error } = await client
-    .from('mcp_tokens')
-    .delete()
-    .eq('id', id);
-
-  if (error) {
-    throw new Error(`Failed to delete MCP token: ${error.message}`);
-  }
+  await db('mcp_tokens')
+    .where('id', id)
+    .delete();
 }
 
 export async function getTokenById(id: string): Promise<McpToken | null> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const data = await db('mcp_tokens')
+    .select('id', 'name', 'token_prefix', 'is_active', 'last_used_at', 'created_at', 'updated_at')
+    .where('id', id)
+    .first();
 
-  const { data, error } = await client
-    .from('mcp_tokens')
-    .select('id, name, token_prefix, is_active, last_used_at, created_at, updated_at')
-    .eq('id', id)
-    .single();
-
-  if (error && error.code !== 'PGRST116') {
-    throw new Error(`Failed to fetch MCP token: ${error.message}`);
-  }
-
-  return data;
+  return data || null;
 }

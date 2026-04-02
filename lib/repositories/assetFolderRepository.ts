@@ -1,11 +1,11 @@
 /**
  * Asset Folder Repository
  *
- * Data access layer for asset folder operations with Supabase
+ * Data access layer for asset folder operations with Knex
  */
 
-import { getSupabaseAdmin } from '@/lib/supabase-server';
-import { SUPABASE_QUERY_LIMIT, SUPABASE_WRITE_BATCH_SIZE } from '@/lib/supabase-constants';
+import { getKnexClient } from '@/lib/knex-client';
+import { SUPABASE_WRITE_BATCH_SIZE } from '@/lib/db-constants';
 import type { AssetFolder, CreateAssetFolderData, UpdateAssetFolderData } from '../../types';
 
 /**
@@ -13,24 +13,13 @@ import type { AssetFolder, CreateAssetFolderData, UpdateAssetFolderData } from '
  * @param isPublished - Filter by published status (default: false for drafts)
  */
 export async function getAllAssetFolders(isPublished = false): Promise<AssetFolder[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('asset_folders')
+  return await db('asset_folders')
     .select('*')
-    .eq('is_published', isPublished)
-    .is('deleted_at', null)
-    .order('order', { ascending: true });
-
-  if (error) {
-    throw new Error(`Failed to fetch asset folders: ${error.message}`);
-  }
-
-  return data || [];
+    .where('is_published', isPublished)
+    .whereNull('deleted_at')
+    .orderBy('order', 'asc');
 }
 
 /**
@@ -39,28 +28,16 @@ export async function getAllAssetFolders(isPublished = false): Promise<AssetFold
  * @param isPublished - Get published or draft version (default: false for draft)
  */
 export async function getAssetFolderById(id: string, isPublished = false): Promise<AssetFolder | null> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('asset_folders')
+  const data = await db('asset_folders')
     .select('*')
-    .eq('id', id)
-    .eq('is_published', isPublished)
-    .is('deleted_at', null)
-    .single();
+    .where('id', id)
+    .where('is_published', isPublished)
+    .whereNull('deleted_at')
+    .first();
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null; // Not found
-    }
-    throw new Error(`Failed to fetch asset folder: ${error.message}`);
-  }
-
-  return data;
+  return data || null;
 }
 
 /**
@@ -72,57 +49,36 @@ export async function getChildFolders(
   parentId: string | null,
   isPublished = false
 ): Promise<AssetFolder[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const query = client
-    .from('asset_folders')
+  let query = db('asset_folders')
     .select('*')
-    .eq('is_published', isPublished)
-    .is('deleted_at', null);
+    .where('is_published', isPublished)
+    .whereNull('deleted_at');
 
-  // Handle null vs non-null parent_id
-  const finalQuery = parentId === null
-    ? query.is('asset_folder_id', null)
-    : query.eq('asset_folder_id', parentId);
-
-  const { data, error } = await finalQuery.order('order', { ascending: true });
-
-  if (error) {
-    throw new Error(`Failed to fetch child folders: ${error.message}`);
+  if (parentId === null) {
+    query = query.whereNull('asset_folder_id');
+  } else {
+    query = query.where('asset_folder_id', parentId);
   }
 
-  return data || [];
+  return await query.orderBy('order', 'asc');
 }
 
 /**
  * Create new asset folder
  */
 export async function createAssetFolder(folderData: CreateAssetFolderData): Promise<AssetFolder> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  // Ensure is_published defaults to false for drafts
   const dataToInsert = {
     ...folderData,
     is_published: folderData.is_published ?? false,
   };
 
-  const { data, error } = await client
-    .from('asset_folders')
+  const [data] = await db('asset_folders')
     .insert(dataToInsert)
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to create asset folder: ${error.message}`);
-  }
+    .returning('*');
 
   return data;
 }
@@ -131,25 +87,19 @@ export async function createAssetFolder(folderData: CreateAssetFolderData): Prom
  * Update asset folder (drafts only)
  */
 export async function updateAssetFolder(id: string, updates: UpdateAssetFolderData): Promise<AssetFolder> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const { data, error } = await client
-    .from('asset_folders')
+  const [data] = await db('asset_folders')
+    .where('id', id)
+    .where('is_published', false)
     .update({
       ...updates,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', id)
-    .eq('is_published', false)
-    .select()
-    .single();
+    .returning('*');
 
-  if (error) {
-    throw new Error(`Failed to update asset folder: ${error.message}`);
+  if (!data) {
+    throw new Error('Failed to update asset folder: record not found');
   }
 
   return data;
@@ -159,28 +109,17 @@ export async function updateAssetFolder(id: string, updates: UpdateAssetFolderDa
  * Get all descendant folder IDs recursively (drafts only)
  */
 async function getDescendantFolderIds(folderId: string): Promise<string[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const allFolders: Array<{ id: string; asset_folder_id: string | null }> = await db('asset_folders')
+    .select('id', 'asset_folder_id')
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
-  // Fetch all non-deleted draft folders once
-  const { data: allFolders, error } = await client
-    .from('asset_folders')
-    .select('id, asset_folder_id')
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (error) {
-    throw new Error(`Failed to fetch folders: ${error.message}`);
-  }
-
-  if (!allFolders || allFolders.length === 0) {
+  if (allFolders.length === 0) {
     return [];
   }
 
-  // Build a map for quick lookup
   const foldersByParent = new Map<string, string[]>();
   for (const folder of allFolders) {
     const parentId = folder.asset_folder_id || 'root';
@@ -190,7 +129,6 @@ async function getDescendantFolderIds(folderId: string): Promise<string[]> {
     foldersByParent.get(parentId)!.push(folder.id);
   }
 
-  // Recursively collect all descendant IDs
   const collectDescendants = (parentId: string): string[] => {
     const children = foldersByParent.get(parentId) || [];
     const descendants: string[] = [...children];
@@ -209,47 +147,29 @@ async function getDescendantFolderIds(folderId: string): Promise<string[]> {
  * Soft delete an asset folder and all its nested assets and folders (drafts only)
  */
 export async function deleteAssetFolder(id: string): Promise<void> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const db = await getKnexClient();
 
   const deletedAt = new Date().toISOString();
 
-  // Get the draft folder before deletion
   const folderToDelete = await getAssetFolderById(id, false);
   if (!folderToDelete) {
     throw new Error('Folder not found');
   }
 
-  // Get all descendant folder IDs
   const descendantFolderIds = await getDescendantFolderIds(id);
   const allFolderIds = [id, ...descendantFolderIds];
 
-  // Soft-delete all draft assets within these folders
-  const { error: assetsError } = await client
-    .from('assets')
-    .update({ deleted_at: new Date().toISOString() })
-    .in('asset_folder_id', allFolderIds)
-    .eq('is_published', false)
-    .is('deleted_at', null);
+  await db('assets')
+    .whereIn('asset_folder_id', allFolderIds)
+    .where('is_published', false)
+    .whereNull('deleted_at')
+    .update({ deleted_at: new Date().toISOString() });
 
-  if (assetsError) {
-    throw new Error(`Failed to delete assets in folder: ${assetsError.message}`);
-  }
-
-  // Soft-delete all draft folders
-  const { error: foldersError } = await client
-    .from('asset_folders')
-    .update({ deleted_at: deletedAt })
-    .in('id', allFolderIds)
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (foldersError) {
-    throw new Error(`Failed to delete folders: ${foldersError.message}`);
-  }
+  await db('asset_folders')
+    .whereIn('id', allFolderIds)
+    .where('is_published', false)
+    .whereNull('deleted_at')
+    .update({ deleted_at: deletedAt });
 }
 
 /**
@@ -282,49 +202,32 @@ export async function reorderFolders(updates: Array<{ id: string; order: number 
  * A folder needs publishing if no published version exists or its data differs.
  */
 export async function getUnpublishedAssetFolders(): Promise<AssetFolder[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  // Fetch all draft folders
-  const { data: draftFolders, error } = await client
-    .from('asset_folders')
+  const draftFolders: AssetFolder[] = await db('asset_folders')
     .select('*')
-    .eq('is_published', false)
-    .is('deleted_at', null)
-    .order('depth', { ascending: true })
-    .order('order', { ascending: true });
+    .where('is_published', false)
+    .whereNull('deleted_at')
+    .orderBy('depth', 'asc')
+    .orderBy('order', 'asc');
 
-  if (error) {
-    throw new Error(`Failed to fetch draft asset folders: ${error.message}`);
-  }
-
-  if (!draftFolders || draftFolders.length === 0) {
+  if (draftFolders.length === 0) {
     return [];
   }
 
-  // Batch fetch published folders for comparison
   const draftIds = draftFolders.map(f => f.id);
-  const { data: publishedFolders, error: publishedError } = await client
-    .from('asset_folders')
+  const publishedFolders: AssetFolder[] = await db('asset_folders')
     .select('*')
-    .in('id', draftIds)
-    .eq('is_published', true);
-
-  if (publishedError) {
-    throw new Error(`Failed to fetch published asset folders: ${publishedError.message}`);
-  }
+    .whereIn('id', draftIds)
+    .where('is_published', true);
 
   const publishedById = new Map<string, AssetFolder>();
-  publishedFolders?.forEach(f => publishedById.set(f.id, f));
+  publishedFolders.forEach(f => publishedById.set(f.id, f));
 
-  // Return only folders that are new or have changed
   return draftFolders.filter(draft => {
     const published = publishedById.get(draft.id);
     if (!published) {
-      return true; // Never published
+      return true;
     }
     return hasAssetFolderChanged(draft, published);
   });
@@ -334,36 +237,12 @@ export async function getUnpublishedAssetFolders(): Promise<AssetFolder[]> {
  * Get soft-deleted draft asset folders
  */
 export async function getDeletedDraftAssetFolders(): Promise<AssetFolder[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  const allFolders: AssetFolder[] = [];
-  let offset = 0;
-
-  while (true) {
-    const { data, error } = await client
-      .from('asset_folders')
-      .select('*')
-      .eq('is_published', false)
-      .not('deleted_at', 'is', null)
-      .range(offset, offset + SUPABASE_QUERY_LIMIT - 1);
-
-    if (error) {
-      throw new Error(`Failed to fetch deleted draft asset folders: ${error.message}`);
-    }
-
-    if (!data || data.length === 0) break;
-
-    allFolders.push(...data);
-
-    if (data.length < SUPABASE_QUERY_LIMIT) break;
-    offset += SUPABASE_QUERY_LIMIT;
-  }
-
-  return allFolders;
+  return await db('asset_folders')
+    .select('*')
+    .where('is_published', false)
+    .whereNotNull('deleted_at');
 }
 
 /** Check if a draft asset folder differs from its published version */
@@ -384,61 +263,44 @@ export async function publishAssetFolders(folderIds: string[]): Promise<{ count:
     return { count: 0 };
   }
 
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
+  const db = await getKnexClient();
 
   const draftFolders: AssetFolder[] = [];
 
-  // Fetch draft folders in batches
   for (let i = 0; i < folderIds.length; i += SUPABASE_WRITE_BATCH_SIZE) {
     const batchIds = folderIds.slice(i, i + SUPABASE_WRITE_BATCH_SIZE);
-    const { data, error: fetchError } = await client
-      .from('asset_folders')
+    const data: AssetFolder[] = await db('asset_folders')
       .select('*')
-      .in('id', batchIds)
-      .eq('is_published', false)
-      .is('deleted_at', null);
+      .whereIn('id', batchIds)
+      .where('is_published', false)
+      .whereNull('deleted_at');
 
-    if (fetchError) {
-      throw new Error(`Failed to fetch draft asset folders: ${fetchError.message}`);
-    }
-
-    if (data) {
-      draftFolders.push(...data);
-    }
+    draftFolders.push(...data);
   }
 
   if (draftFolders.length === 0) {
     return { count: 0 };
   }
 
-  // Sort by depth to ensure parents are published before children
   draftFolders.sort((a, b) => a.depth - b.depth);
 
-  // Fetch existing published versions (full data for comparison)
   const publishedById = new Map<string, AssetFolder>();
   for (let i = 0; i < folderIds.length; i += SUPABASE_WRITE_BATCH_SIZE) {
     const batchIds = folderIds.slice(i, i + SUPABASE_WRITE_BATCH_SIZE);
-    const { data: existingPublished } = await client
-      .from('asset_folders')
+    const existingPublished: AssetFolder[] = await db('asset_folders')
       .select('*')
-      .in('id', batchIds)
-      .eq('is_published', true);
+      .whereIn('id', batchIds)
+      .where('is_published', true);
 
-    existingPublished?.forEach(f => publishedById.set(f.id, f));
+    existingPublished.forEach(f => publishedById.set(f.id, f));
   }
 
-  // Only publish folders that are new or changed
   const recordsToUpsert: any[] = [];
   const now = new Date().toISOString();
 
   for (const draft of draftFolders) {
     const existing = publishedById.get(draft.id);
 
-    // Skip if published version exists and is identical
     if (existing && !hasAssetFolderChanged(draft, existing)) {
       continue;
     }
@@ -456,21 +318,15 @@ export async function publishAssetFolders(folderIds: string[]): Promise<{ count:
     });
   }
 
-  // Keep sorted by depth to ensure parents are processed first
   recordsToUpsert.sort((a: any, b: any) => a.depth - b.depth);
 
   if (recordsToUpsert.length > 0) {
     for (let i = 0; i < recordsToUpsert.length; i += SUPABASE_WRITE_BATCH_SIZE) {
       const batch = recordsToUpsert.slice(i, i + SUPABASE_WRITE_BATCH_SIZE);
-      const { error: upsertError } = await client
-        .from('asset_folders')
-        .upsert(batch, {
-          onConflict: 'id,is_published',
-        });
-
-      if (upsertError) {
-        throw new Error(`Failed to publish asset folders: ${upsertError.message}`);
-      }
+      await db('asset_folders')
+        .insert(batch)
+        .onConflict(['id', 'is_published'])
+        .merge();
     }
   }
 
@@ -481,13 +337,8 @@ export async function publishAssetFolders(folderIds: string[]): Promise<{ count:
  * Hard delete asset folders that were soft-deleted in drafts
  */
 export async function hardDeleteSoftDeletedAssetFolders(): Promise<{ count: number }> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase not configured');
-  }
-
-  // Get all soft-deleted draft folders
   const deletedDrafts = await getDeletedDraftAssetFolders();
 
   if (deletedDrafts.length === 0) {
@@ -496,64 +347,43 @@ export async function hardDeleteSoftDeletedAssetFolders(): Promise<{ count: numb
 
   const ids = deletedDrafts.map(f => f.id);
 
-  // Clear FK references before deleting to avoid composite FK ON DELETE SET NULL
-  // nullifying both asset_folder_id AND is_published (violating NOT NULL constraint)
   for (let i = 0; i < ids.length; i += SUPABASE_WRITE_BATCH_SIZE) {
     const batchIds = ids.slice(i, i + SUPABASE_WRITE_BATCH_SIZE);
 
-    // Clear asset_folder_id on assets referencing these folders
-    await client
-      .from('assets')
-      .update({ asset_folder_id: null })
-      .in('asset_folder_id', batchIds)
-      .eq('is_published', true);
+    await db('assets')
+      .whereIn('asset_folder_id', batchIds)
+      .where('is_published', true)
+      .update({ asset_folder_id: null });
 
-    await client
-      .from('assets')
-      .update({ asset_folder_id: null })
-      .in('asset_folder_id', batchIds)
-      .eq('is_published', false);
+    await db('assets')
+      .whereIn('asset_folder_id', batchIds)
+      .where('is_published', false)
+      .update({ asset_folder_id: null });
 
-    // Clear parent references on child asset_folders
-    await client
-      .from('asset_folders')
-      .update({ asset_folder_id: null })
-      .in('asset_folder_id', batchIds)
-      .eq('is_published', true);
+    await db('asset_folders')
+      .whereIn('asset_folder_id', batchIds)
+      .where('is_published', true)
+      .update({ asset_folder_id: null });
 
-    await client
-      .from('asset_folders')
-      .update({ asset_folder_id: null })
-      .in('asset_folder_id', batchIds)
-      .eq('is_published', false);
+    await db('asset_folders')
+      .whereIn('asset_folder_id', batchIds)
+      .where('is_published', false)
+      .update({ asset_folder_id: null });
   }
 
-  // Delete published and draft versions in batches
   for (let i = 0; i < ids.length; i += SUPABASE_WRITE_BATCH_SIZE) {
     const batchIds = ids.slice(i, i + SUPABASE_WRITE_BATCH_SIZE);
 
-    // Delete published versions
-    const { error: deletePublishedError } = await client
-      .from('asset_folders')
-      .delete()
-      .in('id', batchIds)
-      .eq('is_published', true);
+    await db('asset_folders')
+      .whereIn('id', batchIds)
+      .where('is_published', true)
+      .delete();
 
-    if (deletePublishedError) {
-      console.error('Failed to delete published asset folders:', deletePublishedError);
-    }
-
-    // Delete soft-deleted draft versions
-    const { error: deleteDraftError } = await client
-      .from('asset_folders')
-      .delete()
-      .in('id', batchIds)
-      .eq('is_published', false)
-      .not('deleted_at', 'is', null);
-
-    if (deleteDraftError) {
-      throw new Error(`Failed to delete draft asset folders: ${deleteDraftError.message}`);
-    }
+    await db('asset_folders')
+      .whereIn('id', batchIds)
+      .where('is_published', false)
+      .whereNotNull('deleted_at')
+      .delete();
   }
 
   return { count: deletedDrafts.length };

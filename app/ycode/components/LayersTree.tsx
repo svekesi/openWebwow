@@ -30,7 +30,6 @@ import { useComponentsStore } from '@/stores/useComponentsStore';
 import { useCollectionsStore } from '@/stores/useCollectionsStore';
 import { usePagesStore } from '@/stores/usePagesStore';
 import { useCollaborationPresenceStore, getResourceLockKey, RESOURCE_TYPES } from '@/stores/useCollaborationPresenceStore';
-import { useAuthStore } from '@/stores/useAuthStore';
 
 // 6. Utils/lib
 import { cn } from '@/lib/utils';
@@ -264,7 +263,7 @@ const LayerRow = React.memo(function LayerRow({
   const layerIcon = getLayerIcon(node.layer, 'box', activeBreakpoint);
 
   // Check if layer is locked by another user (using unified resource locks)
-  const currentUserId = useAuthStore((state) => state.user?.id);
+  const currentUserId = 'admin';
   const lockKey = getResourceLockKey(RESOURCE_TYPES.LAYER, node.id);
   const lock = useCollaborationPresenceStore((state) => state.resourceLocks[lockKey]);
   // Access lock directly from state to avoid stale closure issues

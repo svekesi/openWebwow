@@ -1,38 +1,24 @@
-import { getSupabaseAdmin } from '../lib/supabase-server';
+import { getKnexClient } from '../lib/knex-client';
 import type { Layer } from '../types';
 
 const pageId = 'e9c9a71d-ff08-4eb5-84af-94bd21c9b046';
 
 async function checkLayerVariables() {
-  const client = await getSupabaseAdmin();
-  
-  if (!client) {
-    console.error('Supabase not configured');
-    process.exit(1);
-  }
+  const db = await getKnexClient();
 
-  // Get draft layers
-  const { data, error } = await client
-    .from('page_layers')
+  const data = await db('page_layers')
     .select('*')
-    .eq('page_id', pageId)
-    .eq('is_published', false)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single();
-
-  if (error) {
-    console.error('Error fetching layers:', error);
-    process.exit(1);
-  }
+    .where('page_id', pageId)
+    .where('is_published', false)
+    .whereNull('deleted_at')
+    .orderBy('created_at', 'desc')
+    .first();
 
   if (!data || !data.layers) {
     console.log('No layers found');
     process.exit(0);
   }
 
-  // Recursively find all text and heading layers with variables.text
   function findTextLayers(layers: Layer[], path = ''): any[] {
     const results: any[] = [];
     

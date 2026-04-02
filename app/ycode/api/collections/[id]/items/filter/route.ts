@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getKnexClient } from '@/lib/knex-client';
 import { getItemsByCollectionId } from '@/lib/repositories/collectionItemRepository';
 import { getValuesByItemIds } from '@/lib/repositories/collectionItemValueRepository';
 import { getFieldsByCollectionId } from '@/lib/repositories/collectionFieldRepository';
@@ -12,7 +12,7 @@ import type { Layer, CollectionItem, CollectionItemWithValues } from '@/types';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-type SupabaseClient = NonNullable<Awaited<ReturnType<typeof getSupabaseAdmin>>>;
+import type { Knex } from 'knex';
 
 interface FilterCondition {
   fieldId: string;
@@ -22,61 +22,31 @@ interface FilterCondition {
   fieldType?: string;
 }
 
-// PostgREST encodes .in() values into a URL query param.
-// Conservative chunk size avoids hitting URL length limits (~8KB).
-const IN_CHUNK_SIZE = 150;
-
 function escapeLikeValue(val: string): string {
   return val.replace(/[%_\\]/g, '\\$&');
 }
 
-/**
- * Run a query against collection_item_values in chunks to avoid
- * Supabase/PostgREST URL-length limits on .in() clauses.
- *
- * @param build  - receives a chunk of item IDs; must return { data, error }
- * @param itemIds - full array of item IDs to query against
- */
-async function chunkedQuery<T>(
-  build: (chunk: string[]) => PromiseLike<{ data: T[] | null; error: any }>,
-  itemIds: string[],
-): Promise<T[]> {
-  if (itemIds.length === 0) return [];
-  if (itemIds.length <= IN_CHUNK_SIZE) {
-    const { data } = await build(itemIds);
-    return data || [];
-  }
-  const results: T[] = [];
-  for (let i = 0; i < itemIds.length; i += IN_CHUNK_SIZE) {
-    const { data } = await build(itemIds.slice(i, i + IN_CHUNK_SIZE));
-    if (data) results.push(...data);
-  }
-  return results;
-}
-
 async function getAllItemIdsForCollection(
-  client: SupabaseClient,
+  db: Knex,
   collectionId: string,
   isPublished: boolean,
 ): Promise<string[]> {
-  let query = client
-    .from('collection_items')
+  let query = db('collection_items')
     .select('id')
-    .eq('collection_id', collectionId)
-    .eq('is_published', isPublished)
-    .is('deleted_at', null);
+    .where('collection_id', collectionId)
+    .where('is_published', isPublished)
+    .whereNull('deleted_at');
 
   if (isPublished) {
-    query = query.eq('is_publishable', true);
+    query = query.where('is_publishable', true);
   }
 
-  const { data, error } = await query;
-  if (error) throw new Error(`Failed to fetch item IDs: ${error.message}`);
+  const data = await query;
   return data?.map(d => d.id) || [];
 }
 
 async function getIdsMatchingFilter(
-  client: SupabaseClient,
+  db: Knex,
   filter: FilterCondition,
   isPublished: boolean,
   allItemIds: string[],
@@ -84,112 +54,63 @@ async function getIdsMatchingFilter(
   const { fieldId, operator, value } = filter;
   const allSet = new Set(allItemIds);
 
-  const selectIds = (chunk: string[]) =>
-    client
-      .from('collection_item_values')
-      .select('item_id')
-      .eq('field_id', fieldId)
-      .eq('is_published', isPublished)
-      .is('deleted_at', null)
-      .in('item_id', chunk);
-
-  const selectIdsAndValues = (chunk: string[]) =>
-    client
-      .from('collection_item_values')
-      .select('item_id, value')
-      .eq('field_id', fieldId)
-      .eq('is_published', isPublished)
-      .is('deleted_at', null)
-      .in('item_id', chunk);
+  const baseQuery = () => db('collection_item_values')
+    .where('field_id', fieldId)
+    .where('is_published', isPublished)
+    .whereNull('deleted_at')
+    .whereIn('item_id', allItemIds);
 
   switch (operator) {
-    // --- Text positive ---
     case 'contains': {
-      const data = await chunkedQuery(
-        chunk => selectIds(chunk).ilike('value', `%${escapeLikeValue(value)}%`),
-        allItemIds,
-      );
+      const data = await baseQuery().select('item_id').whereRaw('LOWER(value) LIKE LOWER(?)', [`%${escapeLikeValue(value)}%`]);
       return new Set(data.map(d => d.item_id));
     }
     case 'is': {
-      const data = await chunkedQuery(
-        chunk => selectIds(chunk).ilike('value', escapeLikeValue(value)),
-        allItemIds,
-      );
+      const data = await baseQuery().select('item_id').whereRaw('LOWER(value) = LOWER(?)', [value]);
       return new Set(data.map(d => d.item_id));
     }
     case 'starts_with': {
-      const data = await chunkedQuery(
-        chunk => selectIds(chunk).ilike('value', `${escapeLikeValue(value)}%`),
-        allItemIds,
-      );
+      const data = await baseQuery().select('item_id').whereRaw('LOWER(value) LIKE LOWER(?)', [`${escapeLikeValue(value)}%`]);
       return new Set(data.map(d => d.item_id));
     }
     case 'ends_with': {
-      const data = await chunkedQuery(
-        chunk => selectIds(chunk).ilike('value', `%${escapeLikeValue(value)}`),
-        allItemIds,
-      );
+      const data = await baseQuery().select('item_id').whereRaw('LOWER(value) LIKE LOWER(?)', [`%${escapeLikeValue(value)}`]);
       return new Set(data.map(d => d.item_id));
     }
-
-    // --- Text negative (complement) ---
     case 'does_not_contain': {
-      const data = await chunkedQuery(
-        chunk => selectIds(chunk).ilike('value', `%${escapeLikeValue(value)}%`),
-        allItemIds,
-      );
+      const data = await baseQuery().select('item_id').whereRaw('LOWER(value) LIKE LOWER(?)', [`%${escapeLikeValue(value)}%`]);
       const matchIds = new Set(data.map(d => d.item_id));
       return new Set([...allSet].filter(id => !matchIds.has(id)));
     }
     case 'is_not': {
-      const data = await chunkedQuery(
-        chunk => selectIds(chunk).ilike('value', escapeLikeValue(value)),
-        allItemIds,
-      );
+      const data = await baseQuery().select('item_id').whereRaw('LOWER(value) = LOWER(?)', [value]);
       const matchIds = new Set(data.map(d => d.item_id));
       return new Set([...allSet].filter(id => !matchIds.has(id)));
     }
-
-    // --- Presence ---
     case 'is_empty':
     case 'is_not_present': {
-      const data = await chunkedQuery(
-        chunk => selectIds(chunk).neq('value', ''),
-        allItemIds,
-      );
+      const data = await baseQuery().select('item_id').whereNot('value', '');
       const nonEmptyIds = new Set(data.map(d => d.item_id));
       return new Set([...allSet].filter(id => !nonEmptyIds.has(id)));
     }
     case 'is_not_empty':
     case 'is_present':
     case 'exists': {
-      const data = await chunkedQuery(
-        chunk => selectIds(chunk).neq('value', ''),
-        allItemIds,
-      );
+      const data = await baseQuery().select('item_id').whereNot('value', '');
       return new Set(data.map(d => d.item_id));
     }
     case 'does_not_exist': {
-      const data = await chunkedQuery(
-        chunk => selectIds(chunk).neq('value', ''),
-        allItemIds,
-      );
+      const data = await baseQuery().select('item_id').whereNot('value', '');
       const existIds = new Set(data.map(d => d.item_id));
       return new Set([...allSet].filter(id => !existIds.has(id)));
     }
-
-    // --- Numeric ---
     case 'gt':
     case 'gte':
     case 'lt':
     case 'lte': {
       const filterNum = parseFloat(value);
       if (isNaN(filterNum)) return new Set();
-      const data = await chunkedQuery(
-        chunk => selectIdsAndValues(chunk).neq('value', ''),
-        allItemIds,
-      );
+      const data = await baseQuery().select('item_id', 'value').whereNot('value', '');
       const result = new Set<string>();
       for (const row of data) {
         const num = parseFloat(String(row.value ?? ''));
@@ -201,15 +122,10 @@ async function getIdsMatchingFilter(
       }
       return result;
     }
-
-    // --- Date ---
     case 'is_before': {
       const filterDate = new Date(value).getTime();
       if (isNaN(filterDate)) return new Set();
-      const data = await chunkedQuery(
-        chunk => selectIdsAndValues(chunk).neq('value', ''),
-        allItemIds,
-      );
+      const data = await baseQuery().select('item_id', 'value').whereNot('value', '');
       const result = new Set<string>();
       for (const row of data) {
         const d = new Date(String(row.value)).getTime();
@@ -220,10 +136,7 @@ async function getIdsMatchingFilter(
     case 'is_after': {
       const filterDate = new Date(value).getTime();
       if (isNaN(filterDate)) return new Set();
-      const data = await chunkedQuery(
-        chunk => selectIdsAndValues(chunk).neq('value', ''),
-        allItemIds,
-      );
+      const data = await baseQuery().select('item_id', 'value').whereNot('value', '');
       const result = new Set<string>();
       for (const row of data) {
         const d = new Date(String(row.value)).getTime();
@@ -235,49 +148,30 @@ async function getIdsMatchingFilter(
       const startRaw = value?.trim();
       const endRaw = (filter.value2 || '').trim();
       if (!startRaw && !endRaw) return new Set();
-
       const startDate = startRaw ? new Date(startRaw).getTime() : null;
       const endDate = endRaw ? new Date(endRaw).getTime() : null;
-      if ((startDate !== null && isNaN(startDate)) || (endDate !== null && isNaN(endDate))) {
-        return new Set();
-      }
-
-      const data = await chunkedQuery(
-        chunk => selectIdsAndValues(chunk).neq('value', ''),
-        allItemIds,
-      );
+      if ((startDate !== null && isNaN(startDate)) || (endDate !== null && isNaN(endDate))) return new Set();
+      const data = await baseQuery().select('item_id', 'value').whereNot('value', '');
       const result = new Set<string>();
       for (const row of data) {
         const d = new Date(String(row.value)).getTime();
         if (isNaN(d)) continue;
-
-        if (startDate !== null && endDate !== null) {
-          if (d >= startDate && d <= endDate) result.add(row.item_id);
-        } else if (startDate !== null) {
-          if (d >= startDate) result.add(row.item_id);
-        } else if (endDate !== null) {
-          if (d <= endDate) result.add(row.item_id);
-        }
+        if (startDate !== null && endDate !== null) { if (d >= startDate && d <= endDate) result.add(row.item_id); }
+        else if (startDate !== null) { if (d >= startDate) result.add(row.item_id); }
+        else if (endDate !== null) { if (d <= endDate) result.add(row.item_id); }
       }
       return result;
     }
-
-    // --- Reference ---
     case 'is_one_of': {
       try {
         const allowedIds = JSON.parse(value || '[]');
         if (!Array.isArray(allowedIds)) return new Set();
-        const data = await chunkedQuery(chunk => selectIdsAndValues(chunk), allItemIds);
+        const data = await baseQuery().select('item_id', 'value');
         const result = new Set<string>();
         for (const row of data) {
           const val = String(row.value ?? '');
           if (allowedIds.includes(val)) { result.add(row.item_id); continue; }
-          try {
-            const arr = JSON.parse(val);
-            if (Array.isArray(arr) && arr.some((id: string) => allowedIds.includes(id))) {
-              result.add(row.item_id);
-            }
-          } catch { /* not JSON */ }
+          try { const arr = JSON.parse(val); if (Array.isArray(arr) && arr.some((id: string) => allowedIds.includes(id))) result.add(row.item_id); } catch { /* not JSON */ }
         }
         return result;
       } catch { return new Set(); }
@@ -286,49 +180,29 @@ async function getIdsMatchingFilter(
       try {
         const excludedIds = JSON.parse(value || '[]');
         if (!Array.isArray(excludedIds)) return allSet;
-        const data = await chunkedQuery(chunk => selectIdsAndValues(chunk), allItemIds);
+        const data = await baseQuery().select('item_id', 'value');
         const excludeSet = new Set<string>();
         for (const row of data) {
           const val = String(row.value ?? '');
           if (excludedIds.includes(val)) { excludeSet.add(row.item_id); continue; }
-          try {
-            const arr = JSON.parse(val);
-            if (Array.isArray(arr) && arr.some((id: string) => excludedIds.includes(id))) {
-              excludeSet.add(row.item_id);
-            }
-          } catch { /* not JSON */ }
+          try { const arr = JSON.parse(val); if (Array.isArray(arr) && arr.some((id: string) => excludedIds.includes(id))) excludeSet.add(row.item_id); } catch { /* not JSON */ }
         }
         return new Set([...allSet].filter(id => !excludeSet.has(id)));
       } catch { return allSet; }
     }
-
-    // --- Multi-reference ---
     case 'has_items': {
-      const data = await chunkedQuery(
-        chunk => selectIdsAndValues(chunk).neq('value', ''),
-        allItemIds,
-      );
+      const data = await baseQuery().select('item_id', 'value').whereNot('value', '');
       const result = new Set<string>();
       for (const row of data) {
-        try {
-          const arr = JSON.parse(String(row.value));
-          if (Array.isArray(arr) && arr.length > 0) result.add(row.item_id);
-        } catch {
-          if (row.value) result.add(row.item_id);
-        }
+        try { const arr = JSON.parse(String(row.value)); if (Array.isArray(arr) && arr.length > 0) result.add(row.item_id); } catch { if (row.value) result.add(row.item_id); }
       }
       return result;
     }
     case 'has_no_items': {
-      const data = await chunkedQuery(chunk => selectIdsAndValues(chunk), allItemIds);
+      const data = await baseQuery().select('item_id', 'value');
       const hasItemsSet = new Set<string>();
       for (const row of data) {
-        try {
-          const arr = JSON.parse(String(row.value));
-          if (Array.isArray(arr) && arr.length > 0) hasItemsSet.add(row.item_id);
-        } catch {
-          if (row.value) hasItemsSet.add(row.item_id);
-        }
+        try { const arr = JSON.parse(String(row.value)); if (Array.isArray(arr) && arr.length > 0) hasItemsSet.add(row.item_id); } catch { if (row.value) hasItemsSet.add(row.item_id); }
       }
       return new Set([...allSet].filter(id => !hasItemsSet.has(id)));
     }
@@ -336,15 +210,10 @@ async function getIdsMatchingFilter(
       try {
         const requiredIds = JSON.parse(value || '[]');
         if (!Array.isArray(requiredIds)) return new Set();
-        const data = await chunkedQuery(chunk => selectIdsAndValues(chunk), allItemIds);
+        const data = await baseQuery().select('item_id', 'value');
         const result = new Set<string>();
         for (const row of data) {
-          try {
-            const arr = JSON.parse(String(row.value));
-            if (Array.isArray(arr) && requiredIds.every((id: string) => arr.includes(id))) {
-              result.add(row.item_id);
-            }
-          } catch { /* skip */ }
+          try { const arr = JSON.parse(String(row.value)); if (Array.isArray(arr) && requiredIds.every((id: string) => arr.includes(id))) result.add(row.item_id); } catch { /* skip */ }
         }
         return result;
       } catch { return new Set(); }
@@ -353,29 +222,16 @@ async function getIdsMatchingFilter(
       try {
         const requiredIds = JSON.parse(value || '[]');
         if (!Array.isArray(requiredIds)) return new Set();
-        const data = await chunkedQuery(chunk => selectIdsAndValues(chunk), allItemIds);
+        const data = await baseQuery().select('item_id', 'value');
         const result = new Set<string>();
         for (const row of data) {
-          try {
-            const arr = JSON.parse(String(row.value));
-            if (
-              Array.isArray(arr) &&
-              arr.length === requiredIds.length &&
-              requiredIds.every((id: string) => arr.includes(id))
-            ) {
-              result.add(row.item_id);
-            }
-          } catch { /* skip */ }
+          try { const arr = JSON.parse(String(row.value)); if (Array.isArray(arr) && arr.length === requiredIds.length && requiredIds.every((id: string) => arr.includes(id))) result.add(row.item_id); } catch { /* skip */ }
         }
         return result;
       } catch { return new Set(); }
     }
-
     default: {
-      const data = await chunkedQuery(
-        chunk => selectIds(chunk).ilike('value', `%${escapeLikeValue(value)}%`),
-        allItemIds,
-      );
+      const data = await baseQuery().select('item_id').whereRaw('LOWER(value) LIKE LOWER(?)', [`%${escapeLikeValue(value)}%`]);
       return new Set(data.map(d => d.item_id));
     }
   }
@@ -386,10 +242,9 @@ async function getFilteredItemIds(
   isPublished: boolean,
   filterGroups: FilterCondition[][],
 ): Promise<{ matchingIds: string[]; total: number }> {
-  const client = await getSupabaseAdmin();
-  if (!client) throw new Error('Supabase client not configured');
+  const db = await getKnexClient();
 
-  const allItemIds = await getAllItemIdsForCollection(client, collectionId, isPublished);
+  const allItemIds = await getAllItemIdsForCollection(db, collectionId, isPublished);
 
   if (filterGroups.length === 0) {
     return { matchingIds: allItemIds, total: allItemIds.length };
@@ -403,7 +258,7 @@ async function getFilteredItemIds(
 
     for (const filter of group) {
       if (currentIds.size === 0) break;
-      const matchingForFilter = await getIdsMatchingFilter(client, filter, isPublished, [...currentIds]);
+      const matchingForFilter = await getIdsMatchingFilter(db, filter, isPublished, [...currentIds]);
       currentIds = new Set([...currentIds].filter(id => matchingForFilter.has(id)));
     }
 
@@ -437,19 +292,14 @@ async function getFieldValuesForItems(
   itemIds: string[],
 ): Promise<Map<string, string>> {
   if (itemIds.length === 0) return new Map();
-  const client = await getSupabaseAdmin();
-  if (!client) throw new Error('Supabase client not configured');
+  const db = await getKnexClient();
 
-  const rows = await chunkedQuery<{ item_id: string; value: string | null }>(
-    chunk => client
-      .from('collection_item_values')
-      .select('item_id, value')
-      .eq('field_id', fieldId)
-      .eq('is_published', isPublished)
-      .is('deleted_at', null)
-      .in('item_id', chunk),
-    itemIds,
-  );
+  const rows = await db('collection_item_values')
+    .select('item_id', 'value')
+    .where('field_id', fieldId)
+    .where('is_published', isPublished)
+    .whereNull('deleted_at')
+    .whereIn('item_id', itemIds);
 
   const valueMap = new Map<string, string>();
   for (const row of rows) {

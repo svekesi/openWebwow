@@ -101,7 +101,8 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
 
   // Optimize store subscriptions - use selective selectors to prevent unnecessary re-renders
   const signOut = useAuthStore((state) => state.signOut);
-  const user = useAuthStore((state) => state.user);
+  const authenticated = useAuthStore((state) => state.authenticated);
+  const authEnabled = useAuthStore((state) => state.authEnabled);
   const authInitialized = useAuthStore((state) => state.initialized);
 
   const selectedLayerId = useEditorStore((state) => state.selectedLayerId);
@@ -189,11 +190,10 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
   // Collaboration presence - set current user for syncing
   const setCurrentCollaborationUser = useCollaborationPresenceStore((state) => state.setCurrentUser);
   useEffect(() => {
-    if (user) {
-      const avatarUrl = user.user_metadata?.avatar_url || null;
-      setCurrentCollaborationUser(user.id, user.email || '', avatarUrl);
+    if (authenticated) {
+      setCurrentCollaborationUser('admin', 'admin', null);
     }
-  }, [user, setCurrentCollaborationUser]);
+  }, [authenticated, setCurrentCollaborationUser]);
 
   // Sidebar tab from store - immediately synced when tab changes in LeftSidebar
   const activeSidebarTab = useEditorStore((state) => state.activeSidebarTab);
@@ -225,30 +225,62 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
     }
   }, [editingComponentId, currentPageId, setDraftLayers]);
 
-  // Check if Supabase is configured, redirect to setup if not
-  const [supabaseConfigured, setSupabaseConfigured] = useState<boolean | null>(null);
+  // Redirect to setup until DATABASE_URL is configured and the DB is reachable
+  const [setupReady, setSetupReady] = useState<boolean | null>(null);
 
   useEffect(() => {
-    const checkSupabaseConfig = async () => {
-      try {
-        const response = await fetch('/ycode/api/setup/status');
-        const data = await response.json();
+    const checkSetupStatus = async () => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-        if (!data.is_configured) {
-          // Redirect to setup wizard
+      try {
+        const response = await fetch('/ycode/api/setup/status', {
+          signal: controller.signal,
+        });
+        const contentType = response.headers.get('content-type') || '';
+        const rawText = await response.text();
+
+        if (!response.ok) {
+          console.error('Setup status request failed:', response.status, rawText);
+          setSetupReady(false);
           router.push('/ycode/welcome');
           return;
         }
 
-        setSupabaseConfigured(true);
+        if (!contentType.includes('application/json')) {
+          console.error('Setup status returned non-JSON payload');
+          setSetupReady(false);
+          router.push('/ycode/welcome');
+          return;
+        }
+
+        let data: { is_setup_complete?: boolean } = {};
+        try {
+          data = JSON.parse(rawText) as { is_setup_complete?: boolean };
+        } catch {
+          console.error('Failed to parse setup status JSON');
+          setSetupReady(false);
+          router.push('/ycode/welcome');
+          return;
+        }
+
+        if (!data.is_setup_complete) {
+          setSetupReady(false);
+          router.push('/ycode/welcome');
+          return;
+        }
+
+        setSetupReady(true);
       } catch (err) {
-        console.error('Failed to check Supabase config:', err);
-        // On error, redirect to setup to be safe
+        console.error('Failed to check setup status:', err);
+        setSetupReady(false);
         router.push('/ycode/welcome');
+      } finally {
+        clearTimeout(timeoutId);
       }
     };
 
-    checkSupabaseConfig();
+    checkSetupStatus();
   }, [router]);
 
   // Sync viewportMode with activeBreakpoint in store
@@ -429,17 +461,16 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
   }, []);
 
   // Login state (when not authenticated)
-  const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Ensure dark mode is applied for login screen on client-side navigation
   useEffect(() => {
-    if (!user) {
+    if (!authenticated) {
       document.documentElement.classList.add('dark');
     }
-  }, [user]);
+  }, [authenticated]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -447,23 +478,22 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
     setLoginError(null);
 
     const { signIn } = useAuthStore.getState();
-    const result = await signIn(loginEmail, loginPassword);
+    const result = await signIn(loginPassword);
 
     if (result.error) {
       setLoginError(result.error);
       setIsLoggingIn(false);
     }
-    // If successful, user state will update and component will re-render with builder
   };
 
   // Track initial data load completion
   const initialLoadRef = useRef(false);
 
   useEffect(() => {
-    if (migrationsComplete && !builderDataPreloaded && !initialLoadRef.current) {
+    const needsAuth = authEnabled && !authenticated;
+    if (migrationsComplete && !builderDataPreloaded && !initialLoadRef.current && !needsAuth) {
       initialLoadRef.current = true;
 
-      // Load everything in parallel using Promise.all
       const loadBuilderData = async () => {
         try {
           const { editorApi } = await import('@/lib/api');
@@ -473,6 +503,7 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
             console.error('[Editor] Error loading initial data:', response.error);
 
             if (response.error === 'Not authenticated') {
+              initialLoadRef.current = false;
               toast.error('You have been disconnected, please reload the page');
             }
 
@@ -530,7 +561,7 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
 
       loadBuilderData();
     }
-  }, [migrationsComplete, builderDataPreloaded, setBuilderDataPreloaded]);
+  }, [migrationsComplete, builderDataPreloaded, setBuilderDataPreloaded, authenticated, authEnabled]);
 
   // Handle URL-based navigation after data loads
   useEffect(() => {
@@ -1732,9 +1763,13 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
     components,
   ]);
 
-  // Show loading screen while checking Supabase config
-  if (supabaseConfigured === null) {
+  // Show loading screen while checking database setup
+  if (setupReady === null) {
     return <BuilderLoading message="Checking configuration..." />;
+  }
+
+  if (setupReady === false) {
+    return <BuilderLoading message="Redirecting to setup..." />;
   }
 
   // Show loading screen while checking authentication
@@ -1742,8 +1777,8 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
     return <BuilderLoading message="Checking authentication..." />;
   }
 
-  // Show login form if not authenticated
-  if (!user) {
+  // Show login form if auth is enabled and not authenticated
+  if (!authenticated && authEnabled) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-neutral-950 py-10">
 
@@ -1784,21 +1819,6 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
                 <AlertTitle>{loginError}</AlertTitle>
               </Alert>
             )}
-
-            <Field>
-              <Label htmlFor="email">
-                Email
-              </Label>
-              <Input
-                type="email"
-                id="email"
-                value={loginEmail}
-                onChange={(e) => setLoginEmail(e.target.value)}
-                placeholder="you@example.com"
-                disabled={isLoggingIn}
-                required
-              />
-            </Field>
 
             <Field>
               <Label htmlFor="password">
@@ -1855,7 +1875,7 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
       <div className="h-screen flex flex-col">
       {/* Top Header Bar */}
       <HeaderBar
-        user={user}
+        user={null}
         signOut={signOut}
         showPageDropdown={showPageDropdown}
         setShowPageDropdown={setShowPageDropdown}
@@ -1955,11 +1975,11 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
     )}
 
     {/* Collaboration: Realtime Cursors - scoped to context (tab + page/collection/component) */}
-    {user && cursorRoomName && routeType !== 'settings' && routeType !== 'localization' && routeType !== 'profile' && routeType !== 'integrations' && (
+    {authenticated && cursorRoomName && routeType !== 'settings' && routeType !== 'localization' && routeType !== 'profile' && routeType !== 'integrations' && (
       <Suspense fallback={null}>
         <RealtimeCursors
           roomName={cursorRoomName}
-          username={user.user_metadata?.full_name || user.email?.split('@')[0] || 'Anonymous'}
+          username="Admin"
         />
       </Suspense>
     )}

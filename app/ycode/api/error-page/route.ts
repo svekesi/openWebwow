@@ -33,8 +33,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Fetch error page
-    const pageData = await fetchErrorPage(errorCode, published);
+    // Fetch error page.
+    // Fallback to draft if published error pages are not available yet.
+    let pageData = await fetchErrorPage(errorCode, published);
+
+    if (!pageData && published) {
+      pageData = await fetchErrorPage(errorCode, false);
+    }
 
     if (!pageData) {
       return NextResponse.json(
@@ -43,9 +48,10 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Load CSS based on published state
+    // Load CSS based on published state, with draft fallback.
     const cssKey = published ? 'published_css' : 'draft_css';
-    const css = await getSettingByKey(cssKey);
+    const fallbackCssKey = published ? 'draft_css' : 'published_css';
+    const css = await getSettingByKey(cssKey) || await getSettingByKey(fallbackCssKey);
 
     return NextResponse.json({
       pageData,

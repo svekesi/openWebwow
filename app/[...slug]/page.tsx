@@ -1,7 +1,7 @@
 import { notFound, redirect, permanentRedirect } from 'next/navigation';
 import { unstable_cache } from 'next/cache';
 import type { Metadata } from 'next';
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getKnexClient } from '@/lib/knex-client';
 import { buildSlugPath } from '@/lib/page-utils';
 import { generatePageMetadata, fetchGlobalPageSettings } from '@/lib/generate-page-metadata';
 import { fetchPageByPath, fetchErrorPage } from '@/lib/page-fetcher';
@@ -22,37 +22,26 @@ export const dynamicParams = true;
  */
 export async function generateStaticParams() {
   try {
-    const supabase = await getSupabaseAdmin();
+    const db = await getKnexClient();
 
-    if (!supabase) {
-      return [];
-    }
-
-    // Get all published pages and folders (excluding soft-deleted)
-    const { data: pages } = await supabase
-      .from('pages')
+    const pages = await db('pages')
       .select('*')
-      .eq('is_published', true)
-      .is('deleted_at', null);
+      .where('is_published', true)
+      .whereNull('deleted_at');
 
-    const { data: folders } = await supabase
-      .from('page_folders')
+    const folders = await db('page_folders')
       .select('*')
-      .eq('is_published', true)
-      .is('deleted_at', null);
+      .where('is_published', true)
+      .whereNull('deleted_at');
 
-    // Get all active locales
-    const { data: locales } = await supabase
-      .from('locales')
+    const locales = await db('locales')
       .select('*')
-      .is('deleted_at', null);
+      .whereNull('deleted_at');
 
-    // Get all published translations
-    const { data: translations } = await supabase
-      .from('translations')
+    const translations = await db('translations')
       .select('*')
-      .eq('is_published', true)
-      .is('deleted_at', null);
+      .where('is_published', true)
+      .whereNull('deleted_at');
 
     if (!pages || !folders) {
       return [];

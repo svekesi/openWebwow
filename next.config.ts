@@ -1,19 +1,13 @@
+import path from 'path';
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: '**.supabase.co',
-        pathname: '/storage/v1/object/public/**',
-      },
-    ],
+  output: 'standalone',
+  experimental: {
+    // Needed for large Webflow ZIP imports when proxy.ts is active.
+    proxyClientMaxBodySize: '300mb',
   },
 
-  // Ensure sharp works properly in serverless environments (Vercel)
-  // Also externalize Knex database drivers (we only use PostgreSQL)
-  // This works for both webpack and Turbopack
   serverExternalPackages: [
     'sharp',
     'oracledb',
@@ -29,6 +23,8 @@ const nextConfig: NextConfig = {
   // Map unused database drivers to stub modules (we only use PostgreSQL)
   // This prevents Turbopack from trying to resolve packages that aren't installed
   turbopack: {
+    // Force repo root so Turbopack does not pick parent lockfile directory.
+    root: path.resolve(__dirname),
     resolveAlias: {
       // Map unused database drivers to stub module to prevent resolution errors
       'oracledb': './lib/stubs/db-driver-stub.ts',

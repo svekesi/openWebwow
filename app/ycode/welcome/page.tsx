@@ -10,13 +10,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSetupStore } from '@/stores/useSetupStore';
 import { useAuthSession } from '@/hooks/use-auth-session';
-import type { SupabaseConfig } from '@/types';
-import {
-  connectSupabase,
-  runMigrations,
-  completeSetup,
-  checkEmailConfirmDisabled,
-} from '@/lib/api/setup';
+import { connectDatabase, runMigrations } from '@/lib/api/setup';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import {
@@ -77,29 +71,15 @@ function LogoBottomRight() {
 
 export default function WelcomePage() {
   const router = useRouter();
-  const { currentStep, setStep, setSupabaseConfig, supabaseConfig, markComplete } = useSetupStore();
+  const { currentStep, setStep, markComplete } = useSetupStore();
   const { session, isLoading: isAuthLoading } = useAuthSession();
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isVercel, setIsVercel] = useState<boolean | null>(null); // null = loading
-  const [envVarsConfigured, setEnvVarsConfigured] = useState(false);
   const [statusChecked, setStatusChecked] = useState(false);
 
-  // Admin account fields
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-
-  // Supabase connection fields (pre-populated from store if available)
-  const [anonKey, setAnonKey] = useState(supabaseConfig?.anonKey || '');
-  const [serviceRoleKey, setServiceRoleKey] = useState(supabaseConfig?.serviceRoleKey || '');
-  const [connectionUrl, setConnectionUrl] = useState(supabaseConfig?.connectionUrl || '');
-  const [dbPassword, setDbPassword] = useState(supabaseConfig?.dbPassword || '');
-
-  // Email confirmation setting check
-  const [emailConfirmDisabled, setEmailConfirmDisabled] = useState(false);
-  const [checkingEmailConfirm, setCheckingEmailConfirm] = useState(false);
+  const [databaseUrl, setDatabaseUrl] = useState('');
+  const [databasePhase, setDatabasePhase] = useState<'input' | 'env'>('input');
 
   // Ensure dark mode is applied on client-side navigation
   useEffect(() => {
@@ -140,17 +120,21 @@ export default function WelcomePage() {
           return; // Keep showing loading screen during redirect
         }
 
-        setIsVercel(data.is_vercel || false);
-        setEnvVarsConfigured(data.is_configured || false);
         setStatusChecked(true);
       } catch (err) {
         console.error('Failed to check environment:', err);
-        setIsVercel(false); // Default to local on error
         setStatusChecked(true);
       }
     };
     checkEnvironment();
-  }, [currentStep, router, isAuthLoading, session]);
+  }, [router, isAuthLoading, session]);
+
+  useEffect(() => {
+    if (currentStep === 'database') {
+      setDatabasePhase('input');
+      setError(null);
+    }
+  }, [currentStep]);
 
   // Block rendering until checks complete (prevents flash before redirect)
   if (isAuthLoading || !statusChecked) {
@@ -213,7 +197,7 @@ export default function WelcomePage() {
               className="mt-4 animate-in fade-in slide-in-from-bottom-1 duration-700"
               style={{ animationDelay: '3700ms', animationFillMode: 'both' }}
             >
-              <Button onClick={() => setStep('supabase')}>
+              <Button onClick={() => setStep('database')}>
                 Get started
               </Button>
             </div>
@@ -224,367 +208,181 @@ export default function WelcomePage() {
     );
   }
 
-  // Step 2: Connect Supabase
-  if (currentStep === 'supabase') {
-    // Show loading while checking environment
-    if (isVercel === null) {
-      return (
-        <BuilderLoading message="Detecting environment..." />
-      );
-    }
+  // Step 2: DATABASE_URL — validate connection, then instruct to persist in environment
+  if (currentStep === 'database') {
+    const envLine = `DATABASE_URL=${databaseUrl}`;
 
-    // On Vercel: Show environment variable instructions
-    if (isVercel === true) {
-      const handleCheckConfig = async () => {
-        setLoading(true);
-        setError(null);
+    const handleDatabaseSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      setLoading(true);
+      setError(null);
 
-        try {
-          const response = await fetch('/ycode/api/setup/status');
-          const data = await response.json();
+      try {
+        const result = await connectDatabase(databaseUrl.trim());
 
-          if (data.is_configured) {
-            setEnvVarsConfigured(true);
-            // Go to migration step
-            setStep('migrate');
-          } else {
-            // Show specific error from API if available, otherwise generic message
-            if (data.error) {
-              setError(data.error);
-            } else {
-              setError(
-                'Environment variables not detected. Please set them in Vercel Dashboard and redeploy.'
-              );
-            }
-          }
-        } catch (err) {
-          setError('Failed to check configuration');
-        } finally {
-          setLoading(false);
+        if (result.error) {
+          setError(result.error);
+          return;
         }
-      };
 
-      return (
-        <div className="min-h-screen flex flex-col bg-neutral-950">
+        setDatabasePhase('env');
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Connection failed');
+      } finally {
+        setLoading(false);
+      }
+    };
 
-          <LogoBottomRight />
+    const handleVerifyHostedEnv = async () => {
+      setLoading(true);
+      setError(null);
 
-          <div className="flex-1 flex flex-col items-center justify-center py-10">
+      try {
+        const response = await fetch('/ycode/api/setup/status');
+        const data = await response.json();
 
-            <div className="grid grid-cols-3 gap-4 w-full max-w-xl">
+        if (data.is_configured) {
+          setStep('migrate');
+        } else if (data.error) {
+          setError(data.error);
+        } else {
+          setError(
+            'DATABASE_URL is not set in the server environment. Add it in your host settings and redeploy or restart.'
+          );
+        }
+      } catch {
+        setError('Failed to check configuration');
+      } finally {
+        setLoading(false);
+      }
+    };
 
-              <div className="border-t-2 border-white py-4 flex flex-col gap-0.5">
-                <Label variant="muted">Step 1</Label>
-                <Label size="sm">Vercel + Supabase</Label>
-              </div>
+    return (
+      <div className="min-h-screen flex flex-col bg-neutral-950">
 
-              <div className="border-t-2 border-white/50 py-4 flex flex-col gap-0.5 opacity-50">
-                <Label variant="muted">Step 2</Label>
-                <Label size="sm">Run migrations</Label>
-              </div>
+        <LogoBottomRight />
 
-              <div className="border-t-2 border-white/50 py-4 flex flex-col gap-0.5 opacity-50">
-                <Label variant="muted">Step 3</Label>
-                <Label size="sm">Create account</Label>
-              </div>
+        <div className="flex-1 flex flex-col items-center justify-center py-6">
 
+          <div className="grid grid-cols-3 gap-4 w-full max-w-xl">
+
+            <div className="border-t-2 border-white py-4 flex flex-col gap-0.5">
+              <Label variant="muted">Step 1</Label>
+              <Label size="sm">Database</Label>
             </div>
 
-            <div className="w-full max-w-xl py-10">
+            <div className="border-t-2 border-white/50 py-4 flex flex-col gap-0.5 opacity-50">
+              <Label variant="muted">Step 2</Label>
+              <Label size="sm">Run migrations</Label>
+            </div>
 
-              <FieldGroup className="animate-in fade-in slide-in-from-bottom-1 duration-700" style={{ animationFillMode: 'both' }}>
-
-                {error && (
-                  <Alert>
-                    <AlertDescription>
-                      {error}
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                <FieldSet>
-
-                  <FieldLegend>Add 4 environment variables in Vercel</FieldLegend>
-                  <FieldDescription>Go to <span className="text-white/85">Vercel Dashboard</span> → <span className="text-white/85">Your Project</span> → <span className="text-white/85">Settings</span> → <span className="text-white/85">Environment Variables</span>. Add to all environments (Production, Preview, Development).</FieldDescription>
-
-                  <FieldGroup className="mt-2">
-
-                    <Field>
-                      <InputGroup size="sm">
-                        <InputGroupInput
-                          value="SUPABASE_PUBLISHABLE_KEY" size="sm"
-                          readOnly
-                        />
-                        <InputGroupAddon align="inline-end">
-                          <Button
-                            size="xs"
-                            variant="secondary"
-                            className="mr-1"
-                            onClick={() => handleCopy('SUPABASE_PUBLISHABLE_KEY', 'anon')}
-                          >
-                            <Icon name={copiedField === 'anon' ? 'check' : 'copy'} />
-                            {copiedField === 'anon' ? 'Copied' : 'Copy'}
-                          </Button>
-                        </InputGroupAddon>
-                      </InputGroup>
-                      <FieldDescription>
-                        Find it in <span className="text-white/85">Supabase → Project settings → API keys</span>.
-                      </FieldDescription>
-                    </Field>
-
-                    <Field>
-                      <InputGroup size="sm">
-                        <InputGroupInput
-                          value="SUPABASE_SECRET_KEY" size="sm"
-                          readOnly
-                        />
-                        <InputGroupAddon align="inline-end">
-                          <Button
-                            size="xs"
-                            variant="secondary"
-                            className="mr-1"
-                            onClick={() => handleCopy('SUPABASE_SECRET_KEY', 'service')}
-                          >
-                            <Icon name={copiedField === 'service' ? 'check' : 'copy'} />
-                            {copiedField === 'service' ? 'Copied' : 'Copy'}
-                          </Button>
-                        </InputGroupAddon>
-                      </InputGroup>
-                      <FieldDescription>
-                        Find it in <span className="text-white/85">Supabase → Project settings → API keys</span>.
-                      </FieldDescription>
-                    </Field>
-
-                    <Field>
-                      <InputGroup size="sm">
-                        <InputGroupInput
-                          value="SUPABASE_CONNECTION_URL" size="sm"
-                          readOnly
-                        />
-                        <InputGroupAddon align="inline-end">
-                          <Button
-                            size="xs"
-                            variant="secondary"
-                            className="mr-1"
-                            onClick={() => handleCopy('SUPABASE_CONNECTION_URL', 'connection')}
-                          >
-                            <Icon name={copiedField === 'connection' ? 'check' : 'copy'} />
-                            {copiedField === 'connection' ? 'Copied' : 'Copy'}
-                          </Button>
-                        </InputGroupAddon>
-                      </InputGroup>
-                      <FieldDescription>
-                        Find it in <span className="text-white/85">Supabase → Connect → Connection String → Method: Transaction pooler</span>.
-                      </FieldDescription>
-                    </Field>
-
-                    <Field>
-                      <InputGroup size="sm">
-                        <InputGroupInput
-                          value="SUPABASE_DB_PASSWORD" size="sm"
-                          readOnly
-                        />
-                        <InputGroupAddon align="inline-end">
-                          <Button
-                            size="xs"
-                            variant="secondary"
-                            className="mr-1"
-                            onClick={() => handleCopy('SUPABASE_DB_PASSWORD', 'password')}
-                          >
-                            <Icon name={copiedField === 'password' ? 'check' : 'copy'} />
-                            {copiedField === 'password' ? 'Copied' : 'Copy'}
-                          </Button>
-                        </InputGroupAddon>
-                      </InputGroup>
-                      <FieldDescription>
-                        The database password was created with the project. It can be reset in <span className="text-white/85">Database → Settings</span>.
-                      </FieldDescription>
-                    </Field>
-
-                  </FieldGroup>
-
-                </FieldSet>
-
-                <FieldSeparator />
-
-                <FieldSet>
-
-                  <FieldLegend>Redeploy your application</FieldLegend>
-                  <FieldDescription>Go to <span className="text-white/85">Deployment</span> click on <span className="text-white/85">...</span> and click <span className="text-white/85">Create Deployment</span>. After redeploying, click the button below to check if environment variables are detected.</FieldDescription>
-
-                </FieldSet>
-
-                <FieldSeparator />
-
-                <div className="flex flex-col gap-2">
-                  <Button
-                    type="button"
-                    onClick={handleCheckConfig}
-                    disabled={loading}
-                  >
-                    {loading ? <Spinner /> : 'Verify configuration'}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => setStep('welcome')}
-                    disabled={loading}
-                  >
-                    Go back
-                  </Button>
-                </div>
-
-              </FieldGroup>
-
+            <div className="border-t-2 border-white/50 py-4 flex flex-col gap-0.5 opacity-50">
+              <Label variant="muted">Step 3</Label>
+              <Label size="sm">Template</Label>
             </div>
 
           </div>
 
-        </div>
-      );
-    }
+          <div className="w-full max-w-xl py-10">
 
-    // Local development: Show form to enter credentials (only if isVercel === false)
-    if (isVercel === false) {
-      const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-        e.preventDefault();
-        setLoading(true);
-        setError(null);
+            <FieldGroup className="animate-in fade-in slide-in-from-bottom-1 duration-700" style={{ animationFillMode: 'both' }}>
 
-        const config: SupabaseConfig = {
-          anonKey,
-          serviceRoleKey,
-          connectionUrl,
-          dbPassword,
-        };
+              {error && (
+                <Alert variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
 
-        try {
-          const result = await connectSupabase(config);
+              {databasePhase === 'env' ? (
+                <>
+                  <FieldSet>
+                    <FieldLegend>Save DATABASE_URL</FieldLegend>
+                    <FieldDescription>
+                      Add this line to <span className="text-white/85">.env.local</span> (local) or to your host&apos;s environment variables, then restart the app. For hosted deployments, redeploy after saving.
+                    </FieldDescription>
+                    <Field className="mt-4">
+                      <InputGroup size="sm">
+                        <InputGroupInput
+                          value={envLine} readOnly
+                          size="sm"
+                        />
+                        <InputGroupAddon align="inline-end">
+                          <Button
+                            size="xs"
+                            variant="secondary"
+                            className="mr-1"
+                            type="button"
+                            onClick={() => handleCopy(envLine, 'envline')}
+                          >
+                            <Icon name={copiedField === 'envline' ? 'check' : 'copy'} />
+                            {copiedField === 'envline' ? 'Copied' : 'Copy'}
+                          </Button>
+                        </InputGroupAddon>
+                      </InputGroup>
+                    </Field>
+                  </FieldSet>
 
-          if (result.error) {
-            setError(result.error);
-            return;
-          }
+                  <FieldSeparator />
 
-          setSupabaseConfig(config);
-
-          // Go to migration step
-          setStep('migrate');
-        } catch (err) {
-          setError(err instanceof Error ? err.message : 'Connection failed');
-        } finally {
-          setLoading(false);
-        }
-      };
-
-      return (
-        <div className="min-h-screen flex flex-col bg-neutral-950">
-
-          <LogoBottomRight />
-
-          <div className="flex-1 flex flex-col items-center justify-center py-6">
-
-            <div className="grid grid-cols-3 gap-4 w-full max-w-xl">
-
-              <div className="border-t-2 border-white py-4 flex flex-col gap-0.5">
-                <Label variant="muted">Step 1</Label>
-                <Label size="sm">Connect Supabase</Label>
-              </div>
-
-              <div className="border-t-2 border-white/50 py-4 flex flex-col gap-0.5 opacity-50">
-                <Label variant="muted">Step 2</Label>
-                <Label size="sm">Run migrations</Label>
-              </div>
-
-              <div className="border-t-2 border-white/50 py-4 flex flex-col gap-0.5 opacity-50">
-                <Label variant="muted">Step 3</Label>
-                <Label size="sm">Create account</Label>
-              </div>
-
-            </div>
-
-            <div className="w-full max-w-xl py-10">
-
-              <form onSubmit={handleSubmit} className="">
-
-                <FieldGroup className="animate-in fade-in slide-in-from-bottom-1 duration-700" style={{ animationFillMode: 'both' }}>
+                  <div className="flex flex-col gap-2">
+                    <Button
+                      type="button"
+                      onClick={() => setStep('migrate')}
+                    >
+                      Continue to migrations
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={handleVerifyHostedEnv}
+                      disabled={loading}
+                    >
+                      {loading ? <Spinner /> : 'I use hosted env — verify DATABASE_URL'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setDatabasePhase('input')}
+                      disabled={loading}
+                    >
+                      Edit connection string
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setStep('welcome')}
+                      disabled={loading}
+                    >
+                      Go back
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <form onSubmit={handleDatabaseSubmit}>
                   <FieldSet>
                     <FieldGroup className="gap-8">
-
-                      {error && (
-                        <Alert variant="destructive">
-                          <AlertDescription>{error}</AlertDescription>
-                        </Alert>
-                      )}
-
                       <Field>
-                        <FieldLabel htmlFor="anon_key" size="sm">Publishable key</FieldLabel>
+                        <FieldLabel htmlFor="database_url" size="sm">
+                          DATABASE_URL
+                        </FieldLabel>
                         <Input
-                          id="anon_key"
-                          name="anon_key"
-                          value={anonKey}
-                          onChange={(e) => setAnonKey(e.target.value)}
+                          id="database_url"
+                          name="database_url"
+                          value={databaseUrl}
+                          onChange={(e) => setDatabaseUrl(e.target.value)}
+                          placeholder="postgresql://user:password@localhost:5432/ycode"
                           required
                           size="sm"
+                          autoComplete="off"
                         />
                         <FieldDescription>
-                          Find it in <span className="text-white/85">Supabase → Project settings → API keys</span>.
-                        </FieldDescription>
-                      </Field>
-
-                      <Field>
-                        <FieldLabel htmlFor="service_role_key" size="sm">Secret key</FieldLabel>
-                        <Input
-                          id="service_role_key"
-                          name="service_role_key"
-                          value={serviceRoleKey}
-                          onChange={(e) => setServiceRoleKey(e.target.value)}
-                          required
-                          size="sm"
-                        />
-                        <FieldDescription>
-                          Find it in <span className="text-white/85">Supabase → Project settings → API keys</span>.
-                        </FieldDescription>
-                      </Field>
-
-                      <Field>
-                        <FieldLabel htmlFor="connection_url" size="sm">Pooler connection URL</FieldLabel>
-                        <Input
-                          type="text"
-                          id="connection_url"
-                          name="connection_url"
-                          value={connectionUrl}
-                          onChange={(e) => setConnectionUrl(e.target.value)}
-                          required
-                          size="sm"
-                        />
-                        <FieldDescription>
-                          Find it in <span className="text-white/85">Supabase → Connect → Connection String → Method: Transaction pooler</span>.
-                        </FieldDescription>
-                      </Field>
-
-                      <Field>
-                        <FieldLabel htmlFor="connection_url" size="sm">Database Password</FieldLabel>
-                        <Input
-                          type="password"
-                          id="db_password"
-                          name="db_password"
-                          value={dbPassword}
-                          onChange={(e) => setDbPassword(e.target.value)}
-                          required
-                          size="sm"
-                        />
-                        <FieldDescription>
-                          The database password was created with the project. It can be reset in <span className="text-white/85">Database → Settings</span>.
+                          PostgreSQL connection string (same value you will set as <span className="text-white/85">DATABASE_URL</span> in the environment).
                         </FieldDescription>
                       </Field>
 
                       <div className="flex flex-col gap-2 mt-4">
-                        <Button
-                          type="submit"
-                          disabled={loading}
-                        >
-                          {loading ? <Spinner /> : 'Continue'}
+                        <Button type="submit" disabled={loading}>
+                          {loading ? <Spinner /> : 'Test connection'}
                         </Button>
                         <Button
                           type="button"
@@ -595,22 +393,19 @@ export default function WelcomePage() {
                           Go back
                         </Button>
                       </div>
-
                     </FieldGroup>
                   </FieldSet>
-                </FieldGroup>
+                </form>
+              )}
 
-              </form>
-            </div>
+            </FieldGroup>
 
           </div>
 
         </div>
-      );
-    }
 
-    // This should never happen, but just in case
-    return null;
+      </div>
+    );
   }
 
   // Step 3: Run Migrations (Automatic)
@@ -627,7 +422,8 @@ export default function WelcomePage() {
           return;
         }
 
-        setStep('admin');
+        markComplete();
+        setStep('template');
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Migration failed');
       } finally {
@@ -646,7 +442,7 @@ export default function WelcomePage() {
 
             <div className="border-t-2 border-white py-4 flex flex-col gap-0.5">
               <Label variant="muted">Step 1</Label>
-              <Label size="sm">Connect Supabase</Label>
+              <Label size="sm">Database</Label>
             </div>
 
             <div className="border-t-2 border-white py-4 flex flex-col gap-0.5">
@@ -656,7 +452,7 @@ export default function WelcomePage() {
 
             <div className="border-t-2 border-white/50 py-4 flex flex-col gap-0.5 opacity-50">
               <Label variant="muted">Step 3</Label>
-              <Label size="sm">Create account</Label>
+              <Label size="sm">Template</Label>
             </div>
 
           </div>
@@ -677,7 +473,9 @@ export default function WelcomePage() {
                 <Label
                   variant="muted" size="sm"
                   className="leading-relaxed max-w-96"
-                >We&apos;ll automatically create the necessary database tables and storage buckets in your Supabase project.</Label>
+                >
+                  Creates and updates tables via Knex migrations. Ensure <span className="text-white/85">DATABASE_URL</span> is set in the environment before running.
+                </Label>
               </div>
 
               <div className="flex flex-col gap-2">
@@ -690,7 +488,7 @@ export default function WelcomePage() {
                 <Button
                   type="button"
                   variant="ghost"
-                  onClick={() => setStep('supabase')}
+                  onClick={() => setStep('database')}
                   disabled={loading}
                 >
                   Go back
@@ -706,233 +504,7 @@ export default function WelcomePage() {
     );
   }
 
-  // Step 4: Create Admin Account
-  if (currentStep === 'admin') {
-    const handleCheckEmailConfirm = async () => {
-      setCheckingEmailConfirm(true);
-      setError(null);
-
-      try {
-        const result = await checkEmailConfirmDisabled();
-
-        if (result.error) {
-          setError(result.error);
-          return;
-        }
-
-        if (!result.autoconfirm) {
-          setError('Confirm email setting in Supabase is not disabled.');
-          return;
-        }
-
-        setEmailConfirmDisabled(true);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to check setting');
-      } finally {
-        setCheckingEmailConfirm(false);
-      }
-    };
-
-    const handleComplete = async () => {
-      setLoading(true);
-      setError(null);
-
-      // Validate inputs
-      if (!email || !password || !confirmPassword) {
-        setError('Please fill in all fields');
-        setLoading(false);
-        return;
-      }
-
-      if (password !== confirmPassword) {
-        setError('Passwords do not match');
-        setLoading(false);
-        return;
-      }
-
-      if (password.length < 6) {
-        setError('Password must be at least 6 characters');
-        setLoading(false);
-        return;
-      }
-
-      try {
-        // Dynamically import auth store to avoid SSR issues
-        const { useAuthStore } = await import('@/stores/useAuthStore');
-        const { signUp } = useAuthStore.getState();
-
-        // Sign up admin user
-        const result = await signUp(email, password);
-
-        if (result.error) {
-          setError(result.error);
-          return;
-        }
-
-        // Complete setup
-        const setupResult = await completeSetup();
-
-        if (setupResult.error) {
-          setError(setupResult.error);
-          return;
-        }
-
-        markComplete();
-        setStep('template');
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Setup failed');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    return (
-      <div className="min-h-screen flex flex-col bg-neutral-950">
-
-        <LogoBottomRight />
-
-        <div className="flex-1 flex flex-col items-center justify-center py-10">
-
-        <div className="grid grid-cols-3 gap-4 w-full max-w-xl">
-
-          <div className="border-t-2 border-white py-4 flex flex-col gap-0.5">
-            <Label variant="muted">Step 1</Label>
-            <Label size="sm">Connect Supabase</Label>
-          </div>
-
-          <div className="border-t-2 border-white py-4 flex flex-col gap-0.5">
-            <Label variant="muted">Step 2</Label>
-            <Label size="sm">Run migrations</Label>
-          </div>
-
-          <div className="border-t-2 border-white py-4 flex flex-col gap-0.5">
-            <Label variant="muted">Step 3</Label>
-            <Label size="sm">Create account</Label>
-          </div>
-
-        </div>
-
-        {!emailConfirmDisabled ? (
-          <div className="w-full max-w-xl py-10 flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-1 duration-700" style={{ animationFillMode: 'both' }}>
-
-            <div className="flex-1 flex items-center text-center flex-col gap-4 bg-white/5 py-10 px-6 rounded-2xl">
-              <div className="flex flex-col items-center gap-1">
-                <Label size="sm">Adjust Supabase authentication settings</Label>
-                <p className="text-sm text-muted-foreground leading-relaxed">
-                  In your Supabase project, find and disable the setting below.
-                </p>
-              </div>
-              <div className="flex items-center gap-2 bg-white/5 rounded-lg px-4 py-2.5 text-sm text-white/90">
-                <span>Authentication</span>
-                <span className="text-muted-foreground">→</span>
-                <span>Sign In / Providers</span>
-                <span className="text-muted-foreground">→</span>
-                <span className="font-medium">Confirm email</span>
-              </div>
-              <p className="text-xs text-muted-foreground max-w-sm">
-                The confirmation email is not needed.
-              </p>
-            </div>
-
-            {error && (
-              <Alert variant="destructive">
-                <AlertTitle>{error}</AlertTitle>
-              </Alert>
-            )}
-
-            <div className="flex flex-col gap-2">
-              <Button
-                onClick={handleCheckEmailConfirm}
-                disabled={checkingEmailConfirm}
-              >
-                {checkingEmailConfirm ? <Spinner /> : 'Confirm email disabled'}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setStep('migrate')}
-                disabled={checkingEmailConfirm}
-              >
-                Go back
-              </Button>
-            </div>
-
-          </div>
-        ) : (
-          <div className="w-full max-w-xl py-10 flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-1 duration-700" style={{ animationFillMode: 'both' }}>
-
-            <FieldGroup>
-              <FieldSet>
-                <FieldGroup className="gap-8">
-
-                  {error && (
-                    <Alert variant="destructive">
-                      <AlertTitle>{error}</AlertTitle>
-                    </Alert>
-                  )}
-
-                  <Field>
-                    <FieldLabel htmlFor="email" size="sm">Email</FieldLabel>
-                    <Input
-                      type="email"
-                      id="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      disabled={loading}
-                      size="sm"
-                    />
-                  </Field>
-
-                  <Field>
-                    <FieldLabel htmlFor="password" size="sm">Password</FieldLabel>
-                    <Input
-                      type="password"
-                      id="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      disabled={loading}
-                      size="sm"
-                    />
-                    <FieldDescription>At least 6 characters</FieldDescription>
-                  </Field>
-
-                  <Field>
-                    <FieldLabel htmlFor="confirmPassword" size="sm">Confirm password</FieldLabel>
-                    <Input
-                      type="password"
-                      id="confirmPassword"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      disabled={loading}
-                      size="sm"
-                    />
-                  </Field>
-
-                  <div className="flex flex-col gap-4 mt-2">
-                    <Button
-                      type="submit"
-                      onClick={handleComplete}
-                      disabled={loading}
-                    >
-                      {loading ? <Spinner /> : 'Create account'}
-                    </Button>
-                    <FieldDescription className="text-center text-[10px] opacity-60">Your user will be stored securely in Supabase Auth.</FieldDescription>
-                  </div>
-
-                </FieldGroup>
-              </FieldSet>
-            </FieldGroup>
-
-          </div>
-        )}
-
-      </div>
-
-      </div>
-    );
-  }
-
-  // Step 5: Choose a Template or Start from Scratch
+  // Step 4: Choose a Template or Start from Scratch
   if (currentStep === 'template') {
     return (
       <div className="min-h-screen flex flex-col bg-neutral-950">
@@ -950,6 +522,12 @@ export default function WelcomePage() {
                 size="sm"
               >
                 Pick a pre-built design or start with a blank canvas.
+              </Label>
+              <Label
+                variant="muted" size="sm"
+                className="max-w-md mt-2"
+              >
+                Optional: set <span className="text-white/85">ADMIN_PASSWORD</span> in your environment to protect the builder with a login.
               </Label>
             </div>
 

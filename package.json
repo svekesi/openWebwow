@@ -16,7 +16,7 @@
     "no-code",
     "self-hosted",
     "nextjs",
-    "supabase"
+    "postgres"
   ],
   "engines": {
     "node": ">=18"
@@ -31,10 +31,10 @@
     "lint": "eslint .",
     "lint:fix": "eslint --fix .",
     "type-check": "tsc --noEmit",
-    "migrate:make": "NODE_NO_WARNINGS=1 knex migrate:make --knexfile knexfile.ts -x ts",
-    "migrate:latest": "NODE_NO_WARNINGS=1 knex migrate:latest --knexfile knexfile.ts",
-    "migrate:rollback": "NODE_NO_WARNINGS=1 knex migrate:rollback --knexfile knexfile.ts",
-    "migrate:status": "NODE_NO_WARNINGS=1 knex migrate:status --knexfile knexfile.ts",
+    "migrate:make": "NODE_NO_WARNINGS=1 dotenv -- knex migrate:make --knexfile knexfile.ts -x ts",
+    "migrate:latest": "NODE_NO_WARNINGS=1 dotenv -- knex migrate:latest --knexfile knexfile.ts",
+    "migrate:rollback": "NODE_NO_WARNINGS=1 dotenv -- knex migrate:rollback --knexfile knexfile.ts",
+    "migrate:status": "NODE_NO_WARNINGS=1 dotenv -- knex migrate:status --knexfile knexfile.ts",
     "migrate:credentials": "npx ts-node scripts/migrate-credentials.ts",
     "fonts:update": "npx ts-node scripts/fetch-google-fonts.ts",
     "prepare": "husky"
@@ -63,8 +63,6 @@
     "@radix-ui/react-toggle-group": "^1.1.11",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@react-spring/web": "^10.0.3",
-    "@supabase/ssr": "^0.7.0",
-    "@supabase/supabase-js": "^2.76.1",
     "@tanstack/react-virtual": "^3.13.22",
     "@tiptap/core": "^3.10.5",
     "@tiptap/extension-heading": "^3.10.7",
@@ -80,6 +78,7 @@
     "clsx": "^2.1.1",
     "gsap": "^3.13.0",
     "html-to-image": "^1.11.13",
+    "jszip": "^3.10.1",
     "knex": "^3.1.0",
     "lodash": "^4.17.21",
     "lodash.debounce": "^4.0.8",
@@ -87,6 +86,7 @@
     "marked": "^17.0.1",
     "next": "^16.1.6",
     "next-themes": "^0.4.6",
+    "node-html-parser": "^7.1.0",
     "nodemailer": "^7.0.13",
     "pg": "^8.16.3",
     "radix-ui": "^1.4.3",
@@ -114,6 +114,7 @@
     "@types/nodemailer": "^7.0.9",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv-cli": "^11.0.0",
     "eslint": "^9.0.0",
     "eslint-config-next": "^16.1.6",
     "eslint-plugin-react": "^7.37.5",
@@ -123,6 +124,7 @@
     "punycode": "^2.3.1",
     "tailwindcss": "^4",
     "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
     "tw-animate-css": "^1.4.0",
     "typescript": "^5",
     "typescript-eslint": "^8.54.0"
@@ -136,7 +138,7 @@
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [
-      "eslint --fix"
+      "eslint --fix --ignore-pattern 'tools/**' --ignore-pattern 'import/**'"
     ]
   }
 }

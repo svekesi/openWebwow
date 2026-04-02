@@ -1,70 +1,37 @@
 import type { Knex } from 'knex';
 import path from 'path';
-import { credentials } from './lib/credentials.ts';
-import { parseSupabaseConfig } from './lib/supabase-config-parser.ts';
-import type { SupabaseConfig } from './types/index.ts';
 
 /**
- * Knex Configuration for Ycode Supabase Migrations
+ * Knex Configuration for Ycode Migrations
  *
- * This configuration is used to run migrations programmatically
- * against the user's Supabase PostgreSQL database.
+ * Connects directly to PostgreSQL via DATABASE_URL environment variable.
  */
 
-/**
- * Load Supabase credentials from centralized storage
- * Uses environment variables on Vercel, file-based storage locally
- */
-async function getSupabaseConnectionParams() {
-  const config = await credentials.get<SupabaseConfig>('supabase_config');
+function getPoolNumber(envKey: string, fallback: number): number {
+  const raw = process.env[envKey];
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
 
-  if (!config?.connectionUrl || !config?.dbPassword) {
-    throw new Error('Supabase not configured. Please run setup first.');
-  }
-
-  const connectionParams = parseSupabaseConfig(config);
-
-  return {
-    host: connectionParams.dbHost,
-    port: connectionParams.dbPort,
-    database: connectionParams.dbName,
-    user: connectionParams.dbUser,
-    password: connectionParams.dbPassword,
-    ssl: { rejectUnauthorized: false },
-  };
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-const createConfig = (): Knex.Config => {
-  const isVercel = process.env.VERCEL === '1';
-
-  return {
-    client: 'pg',
-    connection: async () => {
-      const connectionParams = await getSupabaseConnectionParams();
-
-      return connectionParams;
-    },
-    migrations: {
-      directory: path.join(process.cwd(), 'database/migrations'),
-      extension: 'ts',
-      tableName: 'migrations',
-    },
-    pool: isVercel ? {
-      // Serverless-optimized pool settings
-      min: 0,
-      max: 1,
-      // Aggressive connection cleanup for serverless
-      acquireTimeoutMillis: 10000,
-      createTimeoutMillis: 10000,
-      idleTimeoutMillis: 1000,
-      reapIntervalMillis: 1000,
-      createRetryIntervalMillis: 200,
-    } : {
-      min: 2,
-      max: 10,
-    },
-  };
-};
+const createConfig = (): Knex.Config => ({
+  client: 'pg',
+  connection: process.env.DATABASE_URL,
+  migrations: {
+    directory: path.join(process.cwd(), 'database/migrations'),
+    extension: 'ts',
+    tableName: 'migrations',
+  },
+  pool: {
+    // Keep idle usage low in Next.js dev to avoid exhausting DB limits
+    // when multiple workers/HMR are active.
+    min: getPoolNumber('DB_POOL_MIN', 0),
+    max: getPoolNumber('DB_POOL_MAX', 20),
+    acquireTimeoutMillis: getPoolNumber('DB_POOL_ACQUIRE_TIMEOUT_MS', 20000),
+    createTimeoutMillis: getPoolNumber('DB_POOL_CREATE_TIMEOUT_MS', 20000),
+    idleTimeoutMillis: getPoolNumber('DB_POOL_IDLE_TIMEOUT_MS', 30000),
+  },
+});
 
 const config: { [key: string]: Knex.Config } = {
   development: createConfig(),

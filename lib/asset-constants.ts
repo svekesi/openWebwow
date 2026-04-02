@@ -6,8 +6,8 @@
 import type { AssetCategory } from '@/types';
 
 /**
- * Supabase Storage bucket and folder prefix constants.
- * All uploads go to a single 'assets' bucket, organized by folder.
+ * Storage folder prefix constants.
+ * All uploads go to the uploads directory, organized by folder.
  */
 export const STORAGE_BUCKET = 'assets';
 export const STORAGE_FOLDERS = {

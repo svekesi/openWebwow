@@ -1,4 +1,5 @@
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getKnexClient } from '@/lib/knex-client';
+import { jsonb } from '@/lib/knex-helpers';
 import type {
   FormSubmission,
   FormSummary,
@@ -11,7 +12,7 @@ import type {
  * Form Submission Repository
  *
  * Handles CRUD operations for form submissions.
- * Uses Supabase/PostgreSQL via admin client.
+ * Uses Knex/PostgreSQL query builder.
  */
 
 /**
@@ -21,30 +22,21 @@ export async function getAllFormSubmissions(
   formId?: string,
   status?: FormSubmissionStatus
 ): Promise<FormSubmission[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  let query = client
-    .from('form_submissions')
+  let query = db('form_submissions')
     .select('*')
-    .order('created_at', { ascending: false });
+    .orderBy('created_at', 'desc');
 
   if (formId) {
-    query = query.eq('form_id', formId);
+    query = query.where('form_id', formId);
   }
 
   if (status) {
-    query = query.eq('status', status);
+    query = query.where('status', status);
   }
 
-  const { data, error } = await query;
-
-  if (error) {
-    throw new Error(`Failed to fetch form submissions: ${error.message}`);
-  }
+  const data = await query;
 
   return data || [];
 }
@@ -53,44 +45,26 @@ export async function getAllFormSubmissions(
  * Get form submission by ID
  */
 export async function getFormSubmissionById(id: string): Promise<FormSubmission | null> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('form_submissions')
+  const data = await db('form_submissions')
     .select('*')
-    .eq('id', id)
-    .single();
+    .where('id', id)
+    .first();
 
-  if (error && error.code !== 'PGRST116') {
-    throw new Error(`Failed to fetch form submission: ${error.message}`);
-  }
-
-  return data;
+  return data || null;
 }
 
 /**
  * Get all unique forms with submission counts
  */
 export async function getFormSummaries(): Promise<FormSummary[]> {
-  const client = await getSupabaseAdmin();
-
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
+  const db = await getKnexClient();
 
   // Get all submissions grouped by form_id
-  const { data, error } = await client
-    .from('form_submissions')
-    .select('form_id, status, created_at')
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    throw new Error(`Failed to fetch form summaries: ${error.message}`);
-  }
+  const data = await db('form_submissions')
+    .select('form_id', 'status', 'created_at')
+    .orderBy('created_at', 'desc');
 
   if (!data || data.length === 0) {
     return [];
@@ -126,27 +100,17 @@ export async function getFormSummaries(): Promise<FormSummary[]> {
 export async function createFormSubmission(
   submissionData: CreateFormSubmissionData
 ): Promise<FormSubmission> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('form_submissions')
+  const [data] = await db('form_submissions')
     .insert({
       form_id: submissionData.form_id,
-      payload: submissionData.payload,
-      metadata: submissionData.metadata || null,
+      payload: jsonb(submissionData.payload),
+      metadata: jsonb(submissionData.metadata || null),
       status: 'new',
       created_at: new Date().toISOString(),
     })
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to create form submission: ${error.message}`);
-  }
+    .returning('*');
 
   return data;
 }
@@ -158,22 +122,12 @@ export async function updateFormSubmission(
   id: string,
   submissionData: UpdateFormSubmissionData
 ): Promise<FormSubmission> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('form_submissions')
+  const [data] = await db('form_submissions')
+    .where('id', id)
     .update(submissionData)
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to update form submission: ${error.message}`);
-  }
+    .returning('*');
 
   return data;
 }
@@ -182,20 +136,11 @@ export async function updateFormSubmission(
  * Delete a form submission
  */
 export async function deleteFormSubmission(id: string): Promise<void> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { error } = await client
-    .from('form_submissions')
-    .delete()
-    .eq('id', id);
-
-  if (error) {
-    throw new Error(`Failed to delete form submission: ${error.message}`);
-  }
+  await db('form_submissions')
+    .where('id', id)
+    .delete();
 }
 
 /**
@@ -204,59 +149,32 @@ export async function deleteFormSubmission(id: string): Promise<void> {
 export async function bulkDeleteFormSubmissions(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
 
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { error } = await client
-    .from('form_submissions')
-    .delete()
-    .in('id', ids);
-
-  if (error) {
-    throw new Error(`Failed to bulk delete form submissions: ${error.message}`);
-  }
+  await db('form_submissions')
+    .whereIn('id', ids)
+    .delete();
 }
 
 /**
  * Delete all submissions for a form
  */
 export async function deleteFormSubmissionsByFormId(formId: string): Promise<void> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { error } = await client
-    .from('form_submissions')
-    .delete()
-    .eq('form_id', formId);
-
-  if (error) {
-    throw new Error(`Failed to delete form submissions: ${error.message}`);
-  }
+  await db('form_submissions')
+    .where('form_id', formId)
+    .delete();
 }
 
 /**
  * Mark all submissions for a form as read
  */
 export async function markAllAsRead(formId: string): Promise<void> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { error } = await client
-    .from('form_submissions')
-    .update({ status: 'read' })
-    .eq('form_id', formId)
-    .eq('status', 'new');
-
-  if (error) {
-    throw new Error(`Failed to mark submissions as read: ${error.message}`);
-  }
+  await db('form_submissions')
+    .where('form_id', formId)
+    .where('status', 'new')
+    .update({ status: 'read' });
 }

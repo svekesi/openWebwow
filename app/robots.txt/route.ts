@@ -6,21 +6,18 @@
 
 import { NextResponse } from 'next/server';
 import { getSettingByKey } from '@/lib/repositories/settingsRepository';
-import { credentials } from '@/lib/credentials';
 import type { SitemapSettings } from '@/types';
 
 /**
  * Get the base URL for robots.txt generation
  */
 function getBaseUrl(): string {
-  // Use environment variable if set
   if (process.env.NEXT_PUBLIC_SITE_URL) {
     return process.env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, '');
   }
 
-  // Fallback to Vercel URL
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}`;
+  if (process.env.BASE_URL) {
+    return process.env.BASE_URL.replace(/\/$/, '');
   }
 
   return '';
@@ -28,8 +25,8 @@ function getBaseUrl(): string {
 
 export async function GET() {
   try {
-    const hasSupabaseCredentials = await credentials.exists();
-    if (!hasSupabaseCredentials) {
+    const hasDatabaseUrl = !!process.env.DATABASE_URL;
+    if (!hasDatabaseUrl) {
       const baseUrl = getBaseUrl();
       const fallback = `# Default robots.txt
 User-agent: *

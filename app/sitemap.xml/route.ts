@@ -5,7 +5,6 @@
  */
 
 import { NextResponse } from 'next/server';
-import { credentials } from '@/lib/credentials';
 
 import { getAllPages } from '@/lib/repositories/pageRepository';
 import { getAllPublishedPageFolders } from '@/lib/repositories/pageFolderRepository';
@@ -25,14 +24,12 @@ import type { SitemapSettings, Translation, CollectionItem } from '@/types';
  * Get the base URL for sitemap generation
  */
 function getBaseUrl(): string {
-  // Use environment variable if set
   if (process.env.NEXT_PUBLIC_SITE_URL) {
     return process.env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, '');
   }
 
-  // Fallback to Vercel URL
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}`;
+  if (process.env.BASE_URL) {
+    return process.env.BASE_URL.replace(/\/$/, '');
   }
 
   return '';
@@ -40,8 +37,8 @@ function getBaseUrl(): string {
 
 export async function GET() {
   try {
-    const hasSupabaseCredentials = await credentials.exists();
-    if (!hasSupabaseCredentials) {
+    const hasDatabaseUrl = !!process.env.DATABASE_URL;
+    if (!hasDatabaseUrl) {
       const xml = generateSitemapXml([]);
       return new NextResponse(xml, {
         headers: {

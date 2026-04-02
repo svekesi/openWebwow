@@ -6,7 +6,6 @@ import { CSS } from '@dnd-kit/utilities';
 import LayerLockIndicator from '@/components/collaboration/LayerLockIndicator';
 import EditingIndicator from '@/components/collaboration/EditingIndicator';
 import { useCollaborationPresenceStore, getResourceLockKey, RESOURCE_TYPES } from '@/stores/useCollaborationPresenceStore';
-import { useAuthStore } from '@/stores/useAuthStore';
 import { useLocalisationStore } from '@/stores/useLocalisationStore';
 import type { Layer, Locale, ComponentVariable, FormSettings, LinkSettings, Breakpoint, CollectionItemWithValues, Component } from '@/types';
 import type { UseLiveLayerUpdatesReturn } from '@/hooks/use-live-layer-updates';
@@ -419,7 +418,7 @@ const LayerItem: React.FC<{
   const textEditable = isTextEditable(layer);
 
   // Collaboration layer locking - use unified resource lock system
-  const currentUserId = useAuthStore((state) => state.user?.id);
+  const currentUserId = 'admin';
   const lockKey = getResourceLockKey(RESOURCE_TYPES.LAYER, layer.id);
   const lock = useCollaborationPresenceStore((state) => state.resourceLocks[lockKey]);
   // Check if locked by another user (only compute when lock exists)

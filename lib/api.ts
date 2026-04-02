@@ -11,9 +11,7 @@ import type { CollectionUsageResult, CollectionFieldUsageResult } from '@/lib/co
 // All API routes are now relative (Next.js API routes)
 const API_BASE = '';
 
-// Get Supabase auth token
 async function getAuthToken(): Promise<string | null> {
-  // TODO: Get from Supabase client when implemented
   return null;
 }
 
@@ -381,23 +379,10 @@ export const setupApi = {
     return apiRequest<{ isComplete: boolean; currentStep: string }>('/ycode/api/setup/status');
   },
 
-  // Connect Supabase
-  async connectSupabase(config: {
-    url: string;
-    anon_key: string;
-    service_role_key: string;
-  }): Promise<ApiResponse<{ success: boolean }>> {
-    return apiRequest<{ success: boolean }>('/ycode/api/setup/connect-supabase', {
+  async connectDatabase(databaseUrl: string): Promise<ApiResponse<{ success: boolean }>> {
+    return apiRequest<{ success: boolean }>('/ycode/api/setup/connect', {
       method: 'POST',
-      body: JSON.stringify(config),
-    });
-  },
-
-  // Update Vercel env vars
-  async updateVercelEnv(vars: Record<string, string>): Promise<ApiResponse<{ success: boolean }>> {
-    return apiRequest<{ success: boolean }>('/ycode/api/setup/update-vercel-env', {
-      method: 'POST',
-      body: JSON.stringify(vars),
+      body: JSON.stringify({ database_url: databaseUrl }),
     });
   },
 

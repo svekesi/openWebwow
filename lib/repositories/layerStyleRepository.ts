@@ -5,7 +5,8 @@
  * Supports draft/published workflow with content hash-based change detection
  */
 
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getKnexClient } from '@/lib/knex-client';
+import { jsonb } from '@/lib/knex-helpers';
 import type { LayerStyle, Layer } from '@/types';
 import { generateLayerStyleContentHash } from '../hash-utils';
 
@@ -43,21 +44,13 @@ export interface LayerStyleSoftDeleteResult {
  * Get all layer styles (draft by default, excludes soft deleted)
  */
 export async function getAllStyles(isPublished: boolean = false): Promise<LayerStyle[]> {
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    throw new Error('Failed to initialize Supabase client');
-  }
+  const db = await getKnexClient();
 
-  const { data, error } = await client
-    .from('layer_styles')
+  const data = await db('layer_styles')
     .select('*')
-    .eq('is_published', isPublished)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    throw new Error(`Failed to fetch layer styles: ${error.message}`);
-  }
+    .where('is_published', isPublished)
+    .whereNull('deleted_at')
+    .orderBy('created_at', 'desc');
 
   return data || [];
 }
@@ -67,53 +60,31 @@ export async function getAllStyles(isPublished: boolean = false): Promise<LayerS
  * With composite primary key, we need to specify is_published to get a single row
  */
 export async function getStyleById(id: string, isPublished: boolean = false): Promise<LayerStyle | null> {
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    throw new Error('Failed to initialize Supabase client');
-  }
+  const db = await getKnexClient();
 
-  const { data, error } = await client
-    .from('layer_styles')
+  const data = await db('layer_styles')
     .select('*')
-    .eq('id', id)
-    .eq('is_published', isPublished)
-    .is('deleted_at', null)
-    .single();
+    .where('id', id)
+    .where('is_published', isPublished)
+    .whereNull('deleted_at')
+    .first();
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null; // Not found
-    }
-    throw new Error(`Failed to fetch layer style: ${error.message}`);
-  }
-
-  return data;
+  return data || null;
 }
 
 /**
  * Get a layer style by ID including soft deleted (for restoration)
  */
 export async function getStyleByIdIncludingDeleted(id: string, isPublished: boolean = false): Promise<LayerStyle | null> {
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    throw new Error('Failed to initialize Supabase client');
-  }
+  const db = await getKnexClient();
 
-  const { data, error } = await client
-    .from('layer_styles')
+  const data = await db('layer_styles')
     .select('*')
-    .eq('id', id)
-    .eq('is_published', isPublished)
-    .single();
+    .where('id', id)
+    .where('is_published', isPublished)
+    .first();
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null; // Not found
-    }
-    throw new Error(`Failed to fetch layer style: ${error.message}`);
-  }
-
-  return data;
+  return data || null;
 }
 
 /**
@@ -122,10 +93,7 @@ export async function getStyleByIdIncludingDeleted(id: string, isPublished: bool
 export async function createStyle(
   styleData: CreateLayerStyleData
 ): Promise<LayerStyle> {
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    throw new Error('Failed to initialize Supabase client');
-  }
+  const db = await getKnexClient();
 
   // Calculate content hash
   const contentHash = generateLayerStyleContentHash({
@@ -134,22 +102,16 @@ export async function createStyle(
     design: styleData.design,
   });
 
-  const { data, error } = await client
-    .from('layer_styles')
+  const [data] = await db('layer_styles')
     .insert({
       name: styleData.name,
       classes: styleData.classes,
-      design: styleData.design,
+      design: jsonb(styleData.design),
       group: styleData.group,
       content_hash: contentHash,
       is_published: false,
     })
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to create layer style: ${error.message}`);
-  }
+    .returning('*');
 
   return data;
 }
@@ -161,10 +123,7 @@ export async function updateStyle(
   id: string,
   updates: Partial<Pick<LayerStyle, 'name' | 'classes' | 'design'>>
 ): Promise<LayerStyle> {
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    throw new Error('Failed to initialize Supabase client');
-  }
+  const db = await getKnexClient();
 
   // Get current style to merge with updates
   const current = await getStyleById(id);
@@ -182,21 +141,16 @@ export async function updateStyle(
   // Recalculate content hash
   const contentHash = generateLayerStyleContentHash(finalData);
 
-  const { data, error } = await client
-    .from('layer_styles')
+  const [data] = await db('layer_styles')
+    .where('id', id)
+    .where('is_published', false)
     .update({
       ...updates,
+      ...(updates.design !== undefined ? { design: jsonb(updates.design) } : {}),
       content_hash: contentHash,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', id)
-    .eq('is_published', false) // Update draft version only
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to update layer style: ${error.message}`);
-  }
+    .returning('*');
 
   return data;
 }
@@ -206,26 +160,15 @@ export async function updateStyle(
  * Used to find the published version of a draft layer style
  */
 export async function getPublishedStyleById(id: string): Promise<LayerStyle | null> {
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    throw new Error('Failed to initialize Supabase client');
-  }
+  const db = await getKnexClient();
 
-  const { data, error } = await client
-    .from('layer_styles')
+  const data = await db('layer_styles')
     .select('*')
-    .eq('id', id)
-    .eq('is_published', true)
-    .single();
+    .where('id', id)
+    .where('is_published', true)
+    .first();
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null; // Not found
-    }
-    throw new Error(`Failed to fetch published layer style: ${error.message}`);
-  }
-
-  return data;
+  return data || null;
 }
 
 /**
@@ -234,10 +177,7 @@ export async function getPublishedStyleById(id: string): Promise<LayerStyle | nu
  * Uses composite primary key (id, is_published) - same ID for draft and published versions
  */
 export async function publishLayerStyle(draftStyleId: string): Promise<LayerStyle> {
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    throw new Error('Failed to initialize Supabase client');
-  }
+  const db = await getKnexClient();
 
   // Get the draft style
   const draftStyle = await getStyleById(draftStyleId);
@@ -246,26 +186,20 @@ export async function publishLayerStyle(draftStyleId: string): Promise<LayerStyl
   }
 
   // Upsert published version - composite key handles insert/update automatically
-  const { data, error } = await client
-    .from('layer_styles')
-    .upsert({
-      id: draftStyle.id, // Same ID for draft and published versions
+  const [data] = await db('layer_styles')
+    .insert({
+      id: draftStyle.id,
       name: draftStyle.name,
       classes: draftStyle.classes,
-      design: draftStyle.design,
+      design: jsonb(draftStyle.design),
       group: draftStyle.group,
-      content_hash: draftStyle.content_hash, // Copy hash from draft
+      content_hash: draftStyle.content_hash,
       is_published: true,
       updated_at: new Date().toISOString(),
-    }, {
-      onConflict: 'id,is_published',
     })
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to publish layer style: ${error.message}`);
-  }
+    .onConflict(['id', 'is_published'])
+    .merge()
+    .returning('*');
 
   return data;
 }
@@ -279,21 +213,13 @@ export async function publishLayerStyles(styleIds: string[]): Promise<{ count: n
     return { count: 0 };
   }
 
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    throw new Error('Failed to initialize Supabase client');
-  }
+  const db = await getKnexClient();
 
   // Batch fetch all draft styles
-  const { data: draftStyles, error: fetchError } = await client
-    .from('layer_styles')
+  const draftStyles = await db('layer_styles')
     .select('*')
-    .in('id', styleIds)
-    .eq('is_published', false);
-
-  if (fetchError) {
-    throw new Error(`Failed to fetch draft layer styles: ${fetchError.message}`);
-  }
+    .whereIn('id', styleIds)
+    .where('is_published', false);
 
   if (!draftStyles || draftStyles.length === 0) {
     return { count: 0 };
@@ -304,7 +230,7 @@ export async function publishLayerStyles(styleIds: string[]): Promise<{ count: n
     id: draft.id,
     name: draft.name,
     classes: draft.classes,
-    design: draft.design,
+    design: jsonb(draft.design),
     group: draft.group,
     content_hash: draft.content_hash,
     is_published: true,
@@ -312,15 +238,10 @@ export async function publishLayerStyles(styleIds: string[]): Promise<{ count: n
   }));
 
   // Batch upsert all styles
-  const { error: upsertError } = await client
-    .from('layer_styles')
-    .upsert(stylesToUpsert, {
-      onConflict: 'id,is_published',
-    });
-
-  if (upsertError) {
-    throw new Error(`Failed to publish layer styles: ${upsertError.message}`);
-  }
+  await db('layer_styles')
+    .insert(stylesToUpsert)
+    .onConflict(['id', 'is_published'])
+    .merge();
 
   return { count: stylesToUpsert.length };
 }
@@ -332,21 +253,13 @@ export async function publishLayerStyles(styleIds: string[]): Promise<{ count: n
  * - Its draft content_hash differs from published content_hash (needs republishing)
  */
 export async function getUnpublishedLayerStyles(): Promise<LayerStyle[]> {
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    throw new Error('Failed to initialize Supabase client');
-  }
+  const db = await getKnexClient();
 
   // Get all draft layer styles
-  const { data: draftStyles, error } = await client
-    .from('layer_styles')
+  const draftStyles = await db('layer_styles')
     .select('*')
-    .eq('is_published', false)
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    throw new Error(`Failed to fetch draft layer styles: ${error.message}`);
-  }
+    .where('is_published', false)
+    .orderBy('created_at', 'desc');
 
   if (!draftStyles || draftStyles.length === 0) {
     return [];
@@ -356,15 +269,10 @@ export async function getUnpublishedLayerStyles(): Promise<LayerStyle[]> {
 
   // Batch fetch all published styles for the draft IDs
   const draftIds = draftStyles.map(s => s.id);
-  const { data: publishedStyles, error: publishedError } = await client
-    .from('layer_styles')
+  const publishedStyles = await db('layer_styles')
     .select('*')
-    .in('id', draftIds)
-    .eq('is_published', true);
-
-  if (publishedError) {
-    throw new Error(`Failed to fetch published layer styles: ${publishedError.message}`);
-  }
+    .whereIn('id', draftIds)
+    .where('is_published', true);
 
   // Build lookup map
   const publishedById = new Map<string, LayerStyle>();
@@ -394,20 +302,12 @@ export async function getUnpublishedLayerStyles(): Promise<LayerStyle[]> {
  * Hard-delete soft-deleted draft layer styles and their published counterparts.
  */
 export async function hardDeleteSoftDeletedLayerStyles(): Promise<{ count: number }> {
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    throw new Error('Failed to initialize Supabase client');
-  }
+  const db = await getKnexClient();
 
-  const { data: deletedDrafts, error } = await client
-    .from('layer_styles')
+  const deletedDrafts = await db('layer_styles')
     .select('id')
-    .eq('is_published', false)
-    .not('deleted_at', 'is', null);
-
-  if (error) {
-    throw new Error(`Failed to fetch deleted draft layer styles: ${error.message}`);
-  }
+    .where('is_published', false)
+    .whereNotNull('deleted_at');
 
   if (!deletedDrafts || deletedDrafts.length === 0) {
     return { count: 0 };
@@ -415,26 +315,20 @@ export async function hardDeleteSoftDeletedLayerStyles(): Promise<{ count: numbe
 
   const ids = deletedDrafts.map(s => s.id);
 
-  const { error: pubError } = await client
-    .from('layer_styles')
-    .delete()
-    .in('id', ids)
-    .eq('is_published', true);
-
-  if (pubError) {
+  try {
+    await db('layer_styles')
+      .whereIn('id', ids)
+      .where('is_published', true)
+      .delete();
+  } catch (pubError) {
     console.error('Failed to delete published layer styles:', pubError);
   }
 
-  const { error: draftError } = await client
-    .from('layer_styles')
-    .delete()
-    .in('id', ids)
-    .eq('is_published', false)
-    .not('deleted_at', 'is', null);
-
-  if (draftError) {
-    throw new Error(`Failed to delete draft layer styles: ${draftError.message}`);
-  }
+  await db('layer_styles')
+    .whereIn('id', ids)
+    .where('is_published', false)
+    .whereNotNull('deleted_at')
+    .delete();
 
   return { count: deletedDrafts.length };
 }
@@ -490,23 +384,15 @@ function detachStyleFromLayersRecursive(layers: Layer[], styleId: string): Layer
  * Returns detailed info including previous and new layers for undo/redo
  */
 export async function findEntitiesUsingLayerStyle(styleId: string): Promise<LayerStyleAffectedEntity[]> {
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    throw new Error('Failed to initialize Supabase client');
-  }
+  const db = await getKnexClient();
 
   const affectedEntities: LayerStyleAffectedEntity[] = [];
 
   // Find affected page_layers
-  const { data: pageLayersRecords, error: pageError } = await client
-    .from('page_layers')
-    .select('id, page_id, layers')
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (pageError) {
-    throw new Error(`Failed to fetch page layers: ${pageError.message}`);
-  }
+  const pageLayersRecords = await db('page_layers')
+    .select('id', 'page_id', 'layers')
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   // Get page info for affected pages
   const affectedPageLayerIds = (pageLayersRecords || [])
@@ -514,16 +400,11 @@ export async function findEntitiesUsingLayerStyle(styleId: string): Promise<Laye
     .map(record => record.page_id);
 
   if (affectedPageLayerIds.length > 0) {
-    const { data: pages, error: pagesError } = await client
-      .from('pages')
-      .select('id, name')
-      .in('id', affectedPageLayerIds)
-      .eq('is_published', false)
-      .is('deleted_at', null);
-
-    if (pagesError) {
-      throw new Error(`Failed to fetch pages: ${pagesError.message}`);
-    }
+    const pages = await db('pages')
+      .select('id', 'name')
+      .whereIn('id', affectedPageLayerIds)
+      .where('is_published', false)
+      .whereNull('deleted_at');
 
     const pageMap = new Map((pages || []).map(p => [p.id, p.name]));
 
@@ -543,15 +424,10 @@ export async function findEntitiesUsingLayerStyle(styleId: string): Promise<Laye
   }
 
   // Find affected components
-  const { data: componentRecords, error: compError } = await client
-    .from('components')
-    .select('id, name, layers')
-    .eq('is_published', false)
-    .is('deleted_at', null);
-
-  if (compError) {
-    throw new Error(`Failed to fetch components: ${compError.message}`);
-  }
+  const componentRecords = await db('components')
+    .select('id', 'name', 'layers')
+    .where('is_published', false)
+    .whereNull('deleted_at');
 
   for (const record of componentRecords || []) {
     if (layersContainStyle(record.layers || [], styleId)) {
@@ -574,21 +450,17 @@ export async function findEntitiesUsingLayerStyle(styleId: string): Promise<Laye
  * Returns the deleted style and affected entities for undo/redo
  */
 export async function softDeleteStyle(id: string): Promise<LayerStyleSoftDeleteResult> {
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    throw new Error('Failed to initialize Supabase client');
-  }
+  const db = await getKnexClient();
 
   // Get the layer style before deleting
-  const { data: layerStyle, error: fetchError } = await client
-    .from('layer_styles')
+  const layerStyle = await db('layer_styles')
     .select('*')
-    .eq('id', id)
-    .eq('is_published', false)
-    .is('deleted_at', null)
-    .single();
+    .where('id', id)
+    .where('is_published', false)
+    .whereNull('deleted_at')
+    .first();
 
-  if (fetchError || !layerStyle) {
+  if (!layerStyle) {
     throw new Error('Layer style not found');
   }
 
@@ -598,28 +470,26 @@ export async function softDeleteStyle(id: string): Promise<LayerStyleSoftDeleteR
   // Detach style from all affected page_layers
   for (const entity of affectedEntities) {
     if (entity.type === 'page') {
-      const { error: updateError } = await client
-        .from('page_layers')
-        .update({
-          layers: entity.newLayers,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', entity.id);
-
-      if (updateError) {
+      try {
+        await db('page_layers')
+          .where('id', entity.id)
+          .update({
+            layers: jsonb(entity.newLayers),
+            updated_at: new Date().toISOString(),
+          });
+      } catch (updateError) {
         console.error(`Failed to update page_layers ${entity.id}:`, updateError);
       }
     } else if (entity.type === 'component') {
-      const { error: updateError } = await client
-        .from('components')
-        .update({
-          layers: entity.newLayers,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', entity.id)
-        .eq('is_published', false);
-
-      if (updateError) {
+      try {
+        await db('components')
+          .where('id', entity.id)
+          .where('is_published', false)
+          .update({
+            layers: jsonb(entity.newLayers),
+            updated_at: new Date().toISOString(),
+          });
+      } catch (updateError) {
         console.error(`Failed to update component ${entity.id}:`, updateError);
       }
     }
@@ -627,14 +497,9 @@ export async function softDeleteStyle(id: string): Promise<LayerStyleSoftDeleteR
 
   // Soft delete the style (both draft and published versions)
   const deletedAt = new Date().toISOString();
-  const { error: deleteError } = await client
-    .from('layer_styles')
-    .update({ deleted_at: deletedAt })
-    .eq('id', id);
-
-  if (deleteError) {
-    throw new Error(`Failed to soft delete layer style: ${deleteError.message}`);
-  }
+  await db('layer_styles')
+    .where('id', id)
+    .update({ deleted_at: deletedAt });
 
   return {
     layerStyle: { ...layerStyle, deleted_at: deletedAt },
@@ -646,22 +511,13 @@ export async function softDeleteStyle(id: string): Promise<LayerStyleSoftDeleteR
  * Restore a soft-deleted layer style
  */
 export async function restoreLayerStyle(id: string): Promise<LayerStyle> {
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    throw new Error('Failed to initialize Supabase client');
-  }
+  const db = await getKnexClient();
 
-  const { data, error } = await client
-    .from('layer_styles')
+  const [data] = await db('layer_styles')
+    .where('id', id)
+    .where('is_published', false)
     .update({ deleted_at: null })
-    .eq('id', id)
-    .eq('is_published', false)
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to restore layer style: ${error.message}`);
-  }
+    .returning('*');
 
   return data;
 }
@@ -671,17 +527,9 @@ export async function restoreLayerStyle(id: string): Promise<LayerStyle> {
  * @deprecated Use softDeleteStyle instead for undo/redo support
  */
 export async function deleteStyle(id: string): Promise<void> {
-  const client = await getSupabaseAdmin();
-  if (!client) {
-    throw new Error('Failed to initialize Supabase client');
-  }
+  const db = await getKnexClient();
 
-  const { error } = await client
-    .from('layer_styles')
-    .delete()
-    .eq('id', id);
-
-  if (error) {
-    throw new Error(`Failed to delete layer style: ${error.message}`);
-  }
+  await db('layer_styles')
+    .where('id', id)
+    .delete();
 }

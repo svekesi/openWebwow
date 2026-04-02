@@ -4,13 +4,14 @@
  * Handles communication with Next.js setup API routes
  */
 
-import type { ApiResponse, SupabaseConfig } from '@/types';
+import type { ApiResponse } from '@/types';
 
 /**
  * Check if setup is complete
  */
 export async function checkSetupStatus(): Promise<{
   is_configured: boolean;
+  is_setup_complete?: boolean;
 }> {
   const response = await fetch('/ycode/api/setup/status');
 
@@ -22,27 +23,22 @@ export async function checkSetupStatus(): Promise<{
 }
 
 /**
- * Connect Supabase credentials (4 fields)
+ * Validate a database connection URL (does not persist DATABASE_URL).
  */
-export async function connectSupabase(
-  config: SupabaseConfig
+export async function connectDatabase(
+  databaseUrl: string
 ): Promise<ApiResponse<void>> {
   const response = await fetch('/ycode/api/setup/connect', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      anon_key: config.anonKey,
-      service_role_key: config.serviceRoleKey,
-      connection_url: config.connectionUrl,
-      db_password: config.dbPassword,
-    }),
+    body: JSON.stringify({ database_url: databaseUrl }),
   });
 
   return response.json();
 }
 
 /**
- * Run Supabase migrations (checks and runs if needed)
+ * Run database migrations (Knex) and seeds if configured
  */
 export async function runMigrations(): Promise<ApiResponse<void>> {
   const response = await fetch('/ycode/api/setup/migrate', {
@@ -51,23 +47,6 @@ export async function runMigrations(): Promise<ApiResponse<void>> {
   });
 
   return response.json();
-}
-
-/**
- * Check if Supabase "Confirm email" setting is disabled (autoconfirm enabled)
- */
-export async function checkEmailConfirmDisabled(): Promise<{
-  autoconfirm: boolean;
-  error?: string;
-}> {
-  const response = await fetch('/ycode/api/setup/check-email-confirm');
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(data?.error || `HTTP ${response.status}: ${response.statusText}`);
-  }
-
-  return data;
 }
 
 /**

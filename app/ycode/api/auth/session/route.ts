@@ -1,74 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
-import { CookieOptions } from '@supabase/ssr';
-import { credentials } from '@/lib/credentials';
-import { cookies } from 'next/headers';
-import { noCache } from '@/lib/api-response';
+import { NextResponse } from 'next/server';
+import { isAuthenticated, isAuthEnabled } from '@/lib/simple-auth';
 
-/**
- * GET /ycode/api/auth/session
- * 
- * Get current user session
- */
-export async function GET(request: NextRequest) {
-  try {
-    // Get Supabase config
-    const config = await credentials.get<{
-      url: string;
-      anonKey: string;
-      serviceRoleKey: string;
-    }>('supabase_config');
+export async function GET() {
+  const authEnabled = isAuthEnabled();
+  const authenticated = await isAuthenticated();
 
-    if (!config) {
-      return noCache(
-        { error: 'Supabase not configured' },
-        500
-      );
-    }
-
-    const cookieStore = await cookies();
-
-    // Create Supabase client
-    const supabase = createServerClient(
-      config.url,
-      config.anonKey,
-      {
-        cookies: {
-          get(name: string) {
-            return cookieStore.get(name)?.value;
-          },
-          set(name: string, value: string, options: CookieOptions) {
-            cookieStore.set({ name, value, ...options });
-          },
-          remove(name: string, options: CookieOptions) {
-            cookieStore.set({ name, value: '', ...options });
-          },
-        },
-      }
-    );
-
-    // Get session
-    const { data: { session }, error } = await supabase.auth.getSession();
-
-    if (error) {
-      return noCache(
-        { error: error.message },
-        401
-      );
-    }
-
-    return noCache({
-      data: {
-        session,
-        user: session?.user || null,
-      },
-    });
-  } catch (error) {
-    console.error('Session check failed:', error);
-    
-    return noCache(
-      { error: 'Session check failed' },
-      500
-    );
-  }
+  return NextResponse.json({
+    authenticated,
+    authEnabled,
+  });
 }

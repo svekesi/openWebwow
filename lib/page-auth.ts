@@ -1,6 +1,6 @@
 import type { Page, PageFolder } from '@/types';
 import { createHmac, randomUUID } from 'crypto';
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getKnexClient } from '@/lib/knex-client';
 
 /**
  * Page Password Protection Utilities
@@ -187,18 +187,16 @@ export function getPasswordProtection(
  * @returns Array of page folders
  */
 export async function fetchFoldersForAuth(isPublished: boolean): Promise<PageFolder[]> {
-  const supabase = await getSupabaseAdmin();
-  if (!supabase) return [];
+  const db = await getKnexClient();
 
-  let query = supabase
-    .from('page_folders')
+  let query = db('page_folders')
     .select('*')
-    .is('deleted_at', null);
+    .whereNull('deleted_at');
 
   if (isPublished) {
-    query = query.eq('is_published', true);
+    query = query.where('is_published', true);
   }
 
-  const { data } = await query;
+  const data = await query;
   return (data as PageFolder[]) || [];
 }

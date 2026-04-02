@@ -784,43 +784,11 @@ export interface PaginatedResponse<T> {
   per_page: number;
 }
 
-// Supabase Config Types (for setup wizard)
-export interface SupabaseConfig {
-  anonKey: string;
-  serviceRoleKey: string;
-  connectionUrl: string; // With [YOUR-PASSWORD] placeholder
-  dbPassword: string; // Actual password to replace [YOUR-PASSWORD]
-}
-
-// Internal credentials structure (derived from SupabaseConfig)
-export interface SupabaseCredentials {
-  anonKey: string;
-  serviceRoleKey: string;
-  connectionUrl: string; // Original with placeholder
-  dbPassword: string;
-  // Derived properties
-  projectId: string;
-  projectUrl: string; // API URL: https://[PROJECT_ID].supabase.co
-  dbHost: string;
-  dbPort: number;
-  dbName: string;
-  dbUser: string;
-}
-
-// Vercel Config Types
-export interface VercelConfig {
-  project_id: string;
-  token: string;
-}
-
 // Setup Wizard Types
-export type SetupStep = 'welcome' | 'supabase' | 'migrate' | 'admin' | 'template' | 'complete';
+export type SetupStep = 'welcome' | 'database' | 'migrate' | 'template' | 'complete';
 
 export interface SetupState {
   currentStep: SetupStep;
-  supabaseConfig?: SupabaseConfig;
-  vercelConfig?: VercelConfig;
-  adminEmail?: string;
   isComplete: boolean;
 }
 
@@ -1027,6 +995,38 @@ export interface CollectionImport {
   column_mapping: Record<string, string>; // csvColumn -> fieldId
   csv_data: Record<string, string>[]; // Array of row objects
   errors: string[] | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Webflow Import Types
+export type WebflowImportStatus = 'pending' | 'processing' | 'completed' | 'failed';
+
+export interface WebflowCsvFile {
+  filename: string;
+  content: string;
+}
+
+export interface WebflowImportPayload {
+  zipFilename: string;
+  zipBase64: string;
+  csvFiles: WebflowCsvFile[];
+}
+
+export interface WebflowImportResult {
+  pages: number;
+  collections: number;
+  items: number;
+  assets: number;
+}
+
+export interface WebflowImport {
+  id: string;
+  status: WebflowImportStatus;
+  payload: WebflowImportPayload;
+  warnings: string[] | null;
+  errors: string[] | null;
+  result: WebflowImportResult | null;
   created_at: string;
   updated_at: string;
 }

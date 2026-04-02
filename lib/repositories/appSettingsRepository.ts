@@ -1,4 +1,5 @@
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getKnexClient } from '@/lib/knex-client';
+import { jsonb } from '@/lib/knex-helpers';
 
 /**
  * App Settings Repository
@@ -28,21 +29,12 @@ export interface AppSetting {
  * Get all settings for a specific app
  */
 export async function getAppSettings(appId: string): Promise<AppSetting[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('app_settings')
+  const data = await db('app_settings')
     .select('*')
-    .eq('app_id', appId)
-    .order('key', { ascending: true });
-
-  if (error) {
-    throw new Error(`Failed to fetch app settings: ${error.message}`);
-  }
+    .where('app_id', appId)
+    .orderBy('key', 'asc');
 
   return data || [];
 }
@@ -54,24 +46,15 @@ export async function getAppSetting(
   appId: string,
   key: string
 ): Promise<AppSetting | null> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('app_settings')
+  const data = await db('app_settings')
     .select('*')
-    .eq('app_id', appId)
-    .eq('key', key)
-    .single();
+    .where('app_id', appId)
+    .where('key', key)
+    .first();
 
-  if (error && error.code !== 'PGRST116') {
-    throw new Error(`Failed to fetch app setting: ${error.message}`);
-  }
-
-  return data;
+  return data || null;
 }
 
 /**
@@ -100,20 +83,11 @@ export async function hasAppSetting(
  * Get all app IDs that have settings configured (i.e. connected apps)
  */
 export async function getConnectedAppIds(): Promise<string[]> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('app_settings')
+  const data = await db('app_settings')
     .select('app_id')
-    .order('app_id');
-
-  if (error) {
-    throw new Error(`Failed to fetch connected apps: ${error.message}`);
-  }
+    .orderBy('app_id');
 
   // Deduplicate app IDs
   const appIds = new Set((data || []).map((row: { app_id: string }) => row.app_id));
@@ -132,29 +106,18 @@ export async function setAppSetting(
   key: string,
   value: unknown
 ): Promise<AppSetting> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { data, error } = await client
-    .from('app_settings')
-    .upsert(
-      {
-        app_id: appId,
-        key,
-        value,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'app_id,key' }
-    )
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to set app setting: ${error.message}`);
-  }
+  const [data] = await db('app_settings')
+    .insert({
+      app_id: appId,
+      key,
+      value: jsonb(value),
+      updated_at: new Date().toISOString(),
+    })
+    .onConflict(['app_id', 'key'])
+    .merge()
+    .returning('*');
 
   return data;
 }
@@ -166,39 +129,21 @@ export async function deleteAppSetting(
   appId: string,
   key: string
 ): Promise<void> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { error } = await client
-    .from('app_settings')
-    .delete()
-    .eq('app_id', appId)
-    .eq('key', key);
-
-  if (error) {
-    throw new Error(`Failed to delete app setting: ${error.message}`);
-  }
+  await db('app_settings')
+    .where('app_id', appId)
+    .where('key', key)
+    .delete();
 }
 
 /**
  * Delete all settings for an app (disconnect)
  */
 export async function deleteAllAppSettings(appId: string): Promise<void> {
-  const client = await getSupabaseAdmin();
+  const db = await getKnexClient();
 
-  if (!client) {
-    throw new Error('Supabase client not configured');
-  }
-
-  const { error } = await client
-    .from('app_settings')
-    .delete()
-    .eq('app_id', appId);
-
-  if (error) {
-    throw new Error(`Failed to delete app settings: ${error.message}`);
-  }
+  await db('app_settings')
+    .where('app_id', appId)
+    .delete();
 }

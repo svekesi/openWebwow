@@ -2,13 +2,16 @@ import knex, { Knex } from 'knex';
 import knexfileConfig from '../knexfile';
 
 /**
- * Knex Client for Ycode Migrations
+ * Knex Client for Ycode
  *
- * Creates a knex instance connected to the user's Supabase PostgreSQL database
+ * Creates a knex instance connected to the PostgreSQL database
  * Uses configuration from knexfile.ts based on NODE_ENV
  */
 
-let knexInstance: Knex | null = null;
+const globalScope = globalThis as typeof globalThis & {
+  __ycodeKnexInstance?: Knex;
+};
+let knexInstance: Knex | null = globalScope.__ycodeKnexInstance || null;
 
 /**
  * Get or create knex instance
@@ -18,7 +21,6 @@ export async function getKnexClient(): Promise<Knex> {
     return knexInstance;
   }
 
-  // Use NODE_ENV to determine which config to use (defaults to development)
   const environment = process.env.NODE_ENV || 'development';
   const config = knexfileConfig[environment];
 
@@ -27,6 +29,7 @@ export async function getKnexClient(): Promise<Knex> {
   }
 
   knexInstance = knex(config);
+  globalScope.__ycodeKnexInstance = knexInstance;
 
   return knexInstance;
 }
@@ -37,12 +40,13 @@ export async function getKnexClient(): Promise<Knex> {
 export async function closeKnexClient(): Promise<void> {
   if (knexInstance) {
     await knexInstance.destroy();
+    globalScope.__ycodeKnexInstance = undefined;
     knexInstance = null;
   }
 }
 
 /**
- * Test database connection using stored credentials
+ * Test database connection
  */
 export async function testKnexConnection(): Promise<boolean> {
   try {
@@ -50,13 +54,12 @@ export async function testKnexConnection(): Promise<boolean> {
     await client.raw('SELECT 1');
     return true;
   } catch (error) {
-    console.error('[testKnexConnection] ✗ Database connection test failed:', {
+    console.error('[testKnexConnection] Database connection test failed:', {
       message: error instanceof Error ? error.message : 'Unknown error',
       code: (error as any)?.code,
       detail: (error as any)?.detail,
     });
 
-    // Clean up on error
     try {
       await closeKnexClient();
     } catch (closeError) {
@@ -68,62 +71,34 @@ export async function testKnexConnection(): Promise<boolean> {
 }
 
 /**
- * Test database connection with Supabase credentials
- * Used during setup to validate credentials before storing them
+ * Test a database connection URL before persisting it
  */
-export async function testSupabaseDirectConnection(credentials: {
-  dbHost: string;
-  dbPort: number;
-  dbName: string;
-  dbUser: string;
-  dbPassword: string;
-}): Promise<{
+export async function testDatabaseConnection(connectionUrl: string): Promise<{
   success: boolean;
   error?: string;
 }> {
   let testClient: Knex | null = null;
 
   try {
-
-    // Create a temporary knex instance with the provided credentials
     testClient = knex({
       client: 'pg',
-      connection: {
-        host: credentials.dbHost,
-        port: credentials.dbPort,
-        database: credentials.dbName,
-        user: credentials.dbUser,
-        password: credentials.dbPassword,
-        ssl: { rejectUnauthorized: false },
-      },
-      pool: {
-        min: 0,
-        max: 1,
-      },
+      connection: connectionUrl,
+      pool: { min: 0, max: 1 },
     });
 
-    // Test the connection
     await testClient.raw('SELECT 1');
-
     return { success: true };
   } catch (error) {
-    console.error('[testSupabaseDirectConnection] ✗ Database connection test failed:', {
-      message: error instanceof Error ? error.message : 'Unknown error',
-      code: (error as any)?.code,
-      detail: (error as any)?.detail,
-    });
-
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Database connection failed',
     };
   } finally {
-    // Always clean up the test client
     if (testClient) {
       try {
         await testClient.destroy();
-      } catch (closeError) {
-        console.error('[testSupabaseDirectConnection] Error closing test connection:', closeError);
+      } catch {
+        // Ignore cleanup errors
       }
     }
   }

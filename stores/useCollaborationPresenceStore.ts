@@ -18,6 +18,20 @@ import {
   getUserStatus,
 } from '../lib/collaboration-utils';
 
+function getSessionId(): string {
+  if (typeof window !== 'undefined') {
+    let id = sessionStorage.getItem('ycode_session_id');
+    if (!id) {
+      id = crypto.randomUUID();
+      sessionStorage.setItem('ycode_session_id', id);
+    }
+    return id;
+  }
+  return 'server';
+}
+
+export { getSessionId };
+
 // Generic resource lock - used for all lockable resources (layers, collection items, etc.)
 export interface ResourceLock {
   resource_type: string; // 'layer' | 'collection_item' | etc.
