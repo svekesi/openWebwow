@@ -1712,7 +1712,7 @@ async function processWebflowImportInternal(
         { key: 'site_description', value: 'Imported from Webflow export' },
         { key: 'ycode_version', value: '0.1.0' },
         { key: 'sitemap', value: getDefaultSitemapSettings() },
-        { key: 'ycode_badge', value: true },
+        { key: 'ycode_badge', value: false },
         { key: 'timezone', value: 'UTC' },
         { key: 'draft_css', value: importedCss },
         { key: 'published_css', value: importedCss },

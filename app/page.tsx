@@ -191,8 +191,8 @@ export async function generateMetadata(): Promise<Metadata> {
 
   if (!data) {
     return {
-      title: 'Ycode',
-      description: 'Built with Ycode',
+      title: '',
+      description: '',
     };
   }
 

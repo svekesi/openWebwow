@@ -426,23 +426,7 @@ export default function GeneralSettingsPage() {
 
                 <FieldSeparator className="col-span-2" />
 
-                <Field orientation="horizontal" className="flex-row-reverse col-span-2">
-                  <FieldContent>
-                    <FieldLabel htmlFor="badge">Display the &ldquo;Made in Ycode&rdquo; badge</FieldLabel>
-                    <FieldDescription>
-                      {isCloudVersion()
-                        ? 'Upgrade to a project plan in order to disable the badge.'
-                        : 'Help support Ycode by displaying this badge on your website.'}
-                    </FieldDescription>
-                  </FieldContent>
-                  <Switch
-                    id="badge"
-                    checked={ycodeBadge}
-                    onCheckedChange={setYcodeBadge}
-                  />
-                </Field>
-
-                <FieldSeparator className="col-span-2" />
+                {/* Branding-Toggle entfernt (Wilhelm/Webwow Whitelabel) */}
 
                 <div className="col-span-2 flex justify-end">
                   <Button

@@ -156,7 +156,7 @@ export default async function PageRenderer({
   gaMeasurementId,
   globalCustomCodeHead,
   globalCustomCodeBody,
-  ycodeBadge = true,
+  ycodeBadge = false,
   passwordProtection,
 }: PageRendererProps) {
   // Check if this is a 401 error page that needs password form
@@ -459,28 +459,9 @@ export default async function PageRenderer({
         <CustomCodeInjector html={pageCustomCodeBody} />
       )}
 
-      {/* Ycode badge (only on published pages, not in preview) */}
-      {ycodeBadge && !isPreview && (
-        <a
-          href="https://ycode.com"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="This website was built using Ycode."
-          style={{
-            height: 'auto',
-            background: '#050606',
-            padding: '12px 14px',
-            width: 'auto',
-            position: 'fixed',
-            bottom: '10px',
-            right: '10px',
-            borderRadius: '8px',
-            display: 'flex',
-            alignItems: 'center',
-            zIndex: 9999,
-            opacity: 1,
-          }}
-        >
+      {/* Branding-Badge komplett entfernt (Wilhelm/Webwow Whitelabel) */}
+      {false && false && (
+        <a href="#">
           <svg
             width="12px"
             height="12px"
