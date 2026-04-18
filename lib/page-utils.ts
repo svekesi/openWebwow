@@ -11,7 +11,7 @@ import { getTiptapTextContent } from '@/lib/text-format-utils';
  * Reserved slugs that cannot be used at the root level (null parent folder)
  * These conflict with the app's routing structure
  */
-export const RESERVED_ROOT_SLUGS = ['ycode'] as const;
+export const RESERVED_ROOT_SLUGS = ['webwow'] as const;
 
 /**
  * Check if a slug is reserved at root level

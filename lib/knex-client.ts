@@ -2,16 +2,16 @@ import knex, { Knex } from 'knex';
 import knexfileConfig from '../knexfile';
 
 /**
- * Knex Client for Ycode
+ * Knex Client for Webwow
  *
  * Creates a knex instance connected to the PostgreSQL database
  * Uses configuration from knexfile.ts based on NODE_ENV
  */
 
 const globalScope = globalThis as typeof globalThis & {
-  __ycodeKnexInstance?: Knex;
+  __webwowKnexInstance?: Knex;
 };
-let knexInstance: Knex | null = globalScope.__ycodeKnexInstance || null;
+let knexInstance: Knex | null = globalScope.__webwowKnexInstance || null;
 
 /**
  * Get or create knex instance
@@ -29,7 +29,7 @@ export async function getKnexClient(): Promise<Knex> {
   }
 
   knexInstance = knex(config);
-  globalScope.__ycodeKnexInstance = knexInstance;
+  globalScope.__webwowKnexInstance = knexInstance;
 
   return knexInstance;
 }
@@ -40,7 +40,7 @@ export async function getKnexClient(): Promise<Knex> {
 export async function closeKnexClient(): Promise<void> {
   if (knexInstance) {
     await knexInstance.destroy();
-    globalScope.__ycodeKnexInstance = undefined;
+    globalScope.__webwowKnexInstance = undefined;
     knexInstance = null;
   }
 }

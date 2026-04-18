@@ -44,10 +44,10 @@ export default async function DynamicHome({ searchParams }: DynamicHomeProps) {
       <div className="min-h-screen flex items-center justify-center bg-white">
         <div className="text-center p-8 flex flex-col items-center justify-center gap-2">
           <h1 className="text-xl font-semibold text-neutral-900">
-            Welcome to Ycode
+            Welcome to Webwow
           </h1>
           <Link
-            href="/ycode"
+            href="/webwow"
             className=" bg-blue-500 text-white text-sm font-medium h-8 flex items-center justify-center px-3 rounded-lg transition-colors"
           >
             Get started
@@ -120,7 +120,7 @@ export default async function DynamicHome({ searchParams }: DynamicHomeProps) {
       gaMeasurementId={globalSettings.gaMeasurementId}
       globalCustomCodeHead={globalSettings.globalCustomCodeHead}
       globalCustomCodeBody={globalSettings.globalCustomCodeBody}
-      ycodeBadge={globalSettings.ycodeBadge}
+      webwowBadge={globalSettings.webwowBadge}
     />
   );
 }

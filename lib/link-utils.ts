@@ -379,9 +379,9 @@ export function resolveCollectionLinkValue(
       href = buildLocalizedSlugPath(page, folders, 'page', locale, translations || undefined);
     }
 
-    // Prefix with /ycode/preview in preview mode
+    // Prefix with /webwow/preview in preview mode
     if (isPreview && href) {
-      href = `/ycode/preview${href}`;
+      href = `/webwow/preview${href}`;
     }
 
     // Append anchor if present
@@ -485,9 +485,9 @@ export function generateLinkHref(
             href = buildLocalizedSlugPath(page, folders, 'page', locale, translations || undefined);
           }
 
-          // Prefix with /ycode/preview in preview mode
+          // Prefix with /webwow/preview in preview mode
           if (isPreview && href) {
-            href = `/ycode/preview${href}`;
+            href = `/webwow/preview${href}`;
           }
         }
       }

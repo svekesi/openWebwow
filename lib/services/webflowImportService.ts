@@ -619,7 +619,7 @@ function createFieldInlineVariableTag(
     (variable.data as Record<string, unknown>).collection_layer_id = collectionLayerId;
   }
 
-  return `<ycode-inline-variable>${JSON.stringify(variable)}</ycode-inline-variable>`;
+  return `<webwow-inline-variable>${JSON.stringify(variable)}</webwow-inline-variable>`;
 }
 
 function inferCollectionForPageSlug(
@@ -1710,9 +1710,9 @@ async function processWebflowImportInternal(
       settings: [
         { key: 'site_name', value: 'Imported from Webflow' },
         { key: 'site_description', value: 'Imported from Webflow export' },
-        { key: 'ycode_version', value: '0.1.0' },
+        { key: 'webwow_version', value: '0.1.0' },
         { key: 'sitemap', value: getDefaultSitemapSettings() },
-        { key: 'ycode_badge', value: false },
+        { key: 'webwow_badge', value: false },
         { key: 'timezone', value: 'UTC' },
         { key: 'draft_css', value: importedCss },
         { key: 'published_css', value: importedCss },

@@ -1,6 +1,6 @@
 import { getKnexClient, closeKnexClient, testKnexConnection } from '../knex-client';
 import { readFile } from '@/lib/local-storage';
-import { YCODE_EXTERNAL_API_URL } from '@/lib/config';
+import { WEBWOW_EXTERNAL_API_URL } from '@/lib/config';
 
 // API key for uploading templates to the shared template service
 const TEMPLATE_UPLOAD_API_KEY =
@@ -492,7 +492,7 @@ export async function exportAndUploadTemplate(
     const assets = await collectTemplateAssets();
 
     // 3. Upload to template service
-    const response = await fetch(`${YCODE_EXTERNAL_API_URL}/api/templates/upload`, {
+    const response = await fetch(`${WEBWOW_EXTERNAL_API_URL}/api/templates/upload`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

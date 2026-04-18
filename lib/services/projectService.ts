@@ -1,7 +1,7 @@
 /**
  * Project Service
  *
- * Handles exporting and importing project data as portable .ycode dumps.
+ * Handles exporting and importing project data as portable .webwow dumps.
  */
 
 import { scryptSync, randomBytes, createCipheriv, createDecipheriv } from 'crypto';
@@ -140,7 +140,7 @@ const SALT_LENGTH = 16;
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
 
-/** 4-byte magic header to identify encrypted .ycode files. */
+/** 4-byte magic header to identify encrypted .webwow files. */
 const ENCRYPTED_MAGIC = Buffer.from('YCEN');
 
 /** Encrypt a buffer with a password using AES-256-GCM. */
@@ -182,7 +182,7 @@ export function isEncrypted(data: Buffer): boolean {
 }
 
 /**
- * Pack export data into a .ycode file buffer.
+ * Pack export data into a .webwow file buffer.
  * Gzip-compresses the JSON; optionally encrypts with a password.
  */
 export function packExport(exportData: ProjectExportData, password?: string): Buffer {
@@ -192,7 +192,7 @@ export function packExport(exportData: ProjectExportData, password?: string): Bu
 }
 
 /**
- * Unpack a .ycode file buffer into export data.
+ * Unpack a .webwow file buffer into export data.
  * Handles both encrypted and plain gzipped files.
  */
 export function unpackImport(
@@ -273,7 +273,7 @@ export async function loadSchemaInfo(
 
 // ─── Shared Helpers ──────────────────────────────────────────────────
 
-const DEFAULT_PROJECT_NAME = 'ycode-app';
+const DEFAULT_PROJECT_NAME = 'webwow-app';
 
 export async function getProjectName(
   knex: Awaited<ReturnType<typeof getKnexClient>>
@@ -362,11 +362,11 @@ export function sanitizeProjectNameSlug(value: string): string {
   return slug || DEFAULT_PROJECT_NAME;
 }
 
-/** Generate a filename for a .ycode export from the manifest. */
+/** Generate a filename for a .webwow export from the manifest. */
 export function getExportFilename(manifest: ProjectManifest): string {
   const name = sanitizeProjectNameSlug(manifest.projectName || DEFAULT_PROJECT_NAME);
   const ts = new Date(manifest.exportedAt).toISOString().slice(0, 19).replace('T', '-').replace(/:/g, '-');
-  return `${name}-${ts}.ycode`;
+  return `${name}-${ts}.webwow`;
 }
 
 // ─── Concurrency Helper ─────────────────────────────────────────────

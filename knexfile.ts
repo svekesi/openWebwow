@@ -2,7 +2,7 @@ import type { Knex } from 'knex';
 import path from 'path';
 
 /**
- * Knex Configuration for Ycode Migrations
+ * Knex Configuration for Webwow Migrations
  *
  * Connects directly to PostgreSQL via DATABASE_URL environment variable.
  */

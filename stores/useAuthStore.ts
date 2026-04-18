@@ -34,7 +34,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     if (get().initialized) return;
 
     try {
-      const response = await fetch('/ycode/api/auth/session');
+      const response = await fetch('/webwow/api/auth/session');
       const data = await response.json();
 
       set({
@@ -56,7 +56,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     set({ loading: true, error: null });
 
     try {
-      const response = await fetch('/ycode/api/auth/login', {
+      const response = await fetch('/webwow/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
@@ -87,7 +87,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     set({ loading: true, error: null });
 
     try {
-      await fetch('/ycode/api/auth/logout', { method: 'POST' });
+      await fetch('/webwow/api/auth/logout', { method: 'POST' });
 
       set({
         authenticated: false,

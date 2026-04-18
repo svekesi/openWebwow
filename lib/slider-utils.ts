@@ -203,7 +203,7 @@ export function syncSliderStateAttributes(swiper: InstanceType<typeof import('sw
 
 /** Load minimal Swiper CSS into an iframe document via <link> tag */
 export function loadSwiperCss(doc: Document) {
-  const id = 'ycode-swiper-css';
+  const id = 'webwow-swiper-css';
   if (doc.getElementById(id)) return;
   const link = doc.createElement('link');
   link.id = id;

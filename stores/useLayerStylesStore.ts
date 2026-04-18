@@ -73,7 +73,7 @@ export const useLayerStylesStore = create<LayerStylesStore>((set, get) => ({
     set({ isLoading: true, error: null });
 
     try {
-      const response = await fetch('/ycode/api/layer-styles');
+      const response = await fetch('/webwow/api/layer-styles');
       const result = await response.json();
 
       if (result.error) {
@@ -93,7 +93,7 @@ export const useLayerStylesStore = create<LayerStylesStore>((set, get) => ({
     set({ isLoading: true, error: null });
 
     try {
-      const response = await fetch('/ycode/api/layer-styles', {
+      const response = await fetch('/webwow/api/layer-styles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -130,7 +130,7 @@ export const useLayerStylesStore = create<LayerStylesStore>((set, get) => ({
     set({ isLoading: true, error: null });
 
     try {
-      const response = await fetch(`/ycode/api/layer-styles/${id}`, {
+      const response = await fetch(`/webwow/api/layer-styles/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
@@ -166,7 +166,7 @@ export const useLayerStylesStore = create<LayerStylesStore>((set, get) => ({
     set({ isLoading: true, error: null });
 
     try {
-      const response = await fetch(`/ycode/api/layer-styles/${id}`, {
+      const response = await fetch(`/webwow/api/layer-styles/${id}`, {
         method: 'DELETE',
       });
 
@@ -328,7 +328,7 @@ export const useLayerStylesStore = create<LayerStylesStore>((set, get) => ({
     // Restore each style via API
     for (const styleId of stylesToRestore) {
       try {
-        const response = await fetch(`/ycode/api/layer-styles/${styleId}`, {
+        const response = await fetch(`/webwow/api/layer-styles/${styleId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'restore' }),

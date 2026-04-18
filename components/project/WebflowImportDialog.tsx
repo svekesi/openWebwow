@@ -121,7 +121,7 @@ export function WebflowImportDialog({
 
     pollingRef.current = setInterval(async () => {
       try {
-        const response = await fetch(`/ycode/api/webflow/import/${id}/status`);
+        const response = await fetch(`/webwow/api/webflow/import/${id}/status`);
         const data = await parseResponseSafely(response);
         if (!response.ok) {
           throw new Error(data.error || 'Failed to fetch import status');
@@ -167,7 +167,7 @@ export function WebflowImportDialog({
         formData.append('csvFiles', csvFile);
       });
 
-      let createResponse = await fetch('/ycode/api/webflow/import', {
+      let createResponse = await fetch('/webwow/api/webflow/import', {
         method: 'POST',
         body: formData,
       });
@@ -188,7 +188,7 @@ export function WebflowImportDialog({
           csvFiles: csvPayload,
         };
 
-        createResponse = await fetch('/ycode/api/webflow/import', {
+        createResponse = await fetch('/webwow/api/webflow/import', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -203,7 +203,7 @@ export function WebflowImportDialog({
       const createdImportId: string = createData.data.importId;
       setImportId(createdImportId);
 
-      const processResponse = await fetch('/ycode/api/webflow/import/process', {
+      const processResponse = await fetch('/webwow/api/webflow/import/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ importId: createdImportId }),
@@ -230,7 +230,7 @@ export function WebflowImportDialog({
         <DialogHeader>
           <DialogTitle>Webflow importieren</DialogTitle>
           <DialogDescription>
-            Importiert Webflow ZIP + CMS CSV in YCode (Seiten, Collections, Relationen und Assets).
+            Importiert Webflow ZIP + CMS CSV in Webwow (Seiten, Collections, Relationen und Assets).
           </DialogDescription>
         </DialogHeader>
 
@@ -336,7 +336,7 @@ export function WebflowImportDialog({
           {step === 'complete' && status?.status === 'completed' && (
             <Button
               onClick={() => {
-                window.location.href = '/ycode';
+                window.location.href = '/webwow';
               }}
             >
               Builder neu laden

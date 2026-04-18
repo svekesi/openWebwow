@@ -48,7 +48,7 @@ export default function MigrationChecker({ onComplete }: MigrationCheckerProps) 
       setProgress('Checking database status...');
       setError(null);
 
-      const statusResponse = await fetch('/ycode/api/setup/status', {
+      const statusResponse = await fetch('/webwow/api/setup/status', {
         method: 'GET',
       });
       const statusResult = await parseResponseSafely(statusResponse) as SetupStatusResponse & { error?: string };
@@ -67,7 +67,7 @@ export default function MigrationChecker({ onComplete }: MigrationCheckerProps) 
       setProgress('Running database migrations...');
 
       // Setup is incomplete - run migrations once.
-      const response = await fetch('/ycode/api/setup/migrate', {
+      const response = await fetch('/webwow/api/setup/migrate', {
         method: 'POST',
       });
       const result = await parseResponseSafely(response);

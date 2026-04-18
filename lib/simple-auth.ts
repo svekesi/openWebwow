@@ -9,7 +9,7 @@ import 'server-only';
 
 import { createHmac, randomUUID } from 'crypto';
 
-const AUTH_COOKIE_NAME = 'ycode_admin_auth';
+const AUTH_COOKIE_NAME = 'webwow_admin_auth';
 
 const fallbackSecret = randomUUID();
 

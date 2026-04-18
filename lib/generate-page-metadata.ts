@@ -27,7 +27,7 @@ export interface GlobalPageSettings {
   colorVariablesCss?: string | null;
   globalCustomCodeHead?: string | null;
   globalCustomCodeBody?: string | null;
-  ycodeBadge?: boolean;
+  webwowBadge?: boolean;
   faviconUrl?: string | null;
   webClipUrl?: string | null;
 }
@@ -70,7 +70,7 @@ export const fetchGlobalPageSettings = cache(async (): Promise<GlobalPageSetting
     'published_css',
     'custom_code_head',
     'custom_code_body',
-    'ycode_badge',
+    'webwow_badge',
     'favicon_asset_id',
     'web_clip_asset_id',
   ]);
@@ -111,7 +111,7 @@ export const fetchGlobalPageSettings = cache(async (): Promise<GlobalPageSetting
     colorVariablesCss,
     globalCustomCodeHead: settings.custom_code_head || null,
     globalCustomCodeBody: settings.custom_code_body || null,
-    ycodeBadge: settings.ycode_badge ?? true,
+    webwowBadge: settings.webwow_badge ?? true,
     faviconUrl,
     webClipUrl,
   };

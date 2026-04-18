@@ -1,5 +1,5 @@
 /**
- * API Client for Ycode Builder
+ * API Client for Webwow Builder
  *
  * Handles communication with Next.js API routes
  */
@@ -71,27 +71,27 @@ async function apiRequest<T>(
 export const pagesApi = {
   // Get all pages
   async getAll(): Promise<ApiResponse<Page[]>> {
-    return apiRequest<Page[]>('/ycode/api/pages');
+    return apiRequest<Page[]>('/webwow/api/pages');
   },
 
   // Get page by ID
   async getById(id: string): Promise<ApiResponse<Page>> {
-    return apiRequest<Page>(`/ycode/api/pages/${id}`);
+    return apiRequest<Page>(`/webwow/api/pages/${id}`);
   },
 
   // Get page by slug
   async getBySlug(slug: string): Promise<ApiResponse<Page>> {
-    return apiRequest<Page>(`/ycode/api/pages/slug/${slug}`);
+    return apiRequest<Page>(`/webwow/api/pages/slug/${slug}`);
   },
 
   // Get all published pages (for public website)
   async getAllPublished(): Promise<ApiResponse<Page[]>> {
-    return apiRequest<Page[]>('/ycode/api/pages?is_published=true');
+    return apiRequest<Page[]>('/webwow/api/pages?is_published=true');
   },
 
   // Create new page
   async create(page: Omit<Page, 'id' | 'created_at' | 'updated_at' | 'deleted_at'>): Promise<ApiResponse<Page>> {
-    return apiRequest<Page>('/ycode/api/pages', {
+    return apiRequest<Page>('/webwow/api/pages', {
       method: 'POST',
       body: JSON.stringify(page),
     });
@@ -99,7 +99,7 @@ export const pagesApi = {
 
   // Update page
   async update(id: string, page: Partial<Page>): Promise<ApiResponse<Page>> {
-    return apiRequest<Page>(`/ycode/api/pages/${id}`, {
+    return apiRequest<Page>(`/webwow/api/pages/${id}`, {
       method: 'PUT',
       body: JSON.stringify(page),
     });
@@ -107,14 +107,14 @@ export const pagesApi = {
 
   // Delete page
   async delete(id: string): Promise<ApiResponse<void>> {
-    return apiRequest<void>(`/ycode/api/pages/${id}`, {
+    return apiRequest<void>(`/webwow/api/pages/${id}`, {
       method: 'DELETE',
     });
   },
 
   // Get unpublished pages
   async getUnpublished(): Promise<ApiResponse<Page[]>> {
-    return apiRequest<Page[]>('/ycode/api/pages/unpublished');
+    return apiRequest<Page[]>('/webwow/api/pages/unpublished');
   },
 };
 
@@ -122,12 +122,12 @@ export const pagesApi = {
 export const foldersApi = {
   // Get all folders
   async getAll(): Promise<ApiResponse<PageFolder[]>> {
-    return apiRequest<PageFolder[]>('/ycode/api/folders');
+    return apiRequest<PageFolder[]>('/webwow/api/folders');
   },
 
   // Create new folder
   async create(folder: Omit<PageFolder, 'id' | 'created_at' | 'updated_at' | 'deleted_at'>): Promise<ApiResponse<PageFolder>> {
-    return apiRequest<PageFolder>('/ycode/api/folders', {
+    return apiRequest<PageFolder>('/webwow/api/folders', {
       method: 'POST',
       body: JSON.stringify(folder),
     });
@@ -135,7 +135,7 @@ export const foldersApi = {
 
   // Update folder
   async update(id: string, folder: Partial<PageFolder>): Promise<ApiResponse<PageFolder>> {
-    return apiRequest<PageFolder>(`/ycode/api/folders/${id}`, {
+    return apiRequest<PageFolder>(`/webwow/api/folders/${id}`, {
       method: 'PUT',
       body: JSON.stringify(folder),
     });
@@ -143,7 +143,7 @@ export const foldersApi = {
 
   // Delete folder
   async delete(id: string): Promise<ApiResponse<void>> {
-    return apiRequest<void>(`/ycode/api/folders/${id}`, {
+    return apiRequest<void>(`/webwow/api/folders/${id}`, {
       method: 'DELETE',
     });
   },
@@ -157,12 +157,12 @@ export const layersApi = {
     if (isPublished !== undefined) {
       params.append('is_published', String(isPublished));
     }
-    return apiRequest<PageLayers>(`/ycode/api/layers?${params.toString()}`);
+    return apiRequest<PageLayers>(`/webwow/api/layers?${params.toString()}`);
   },
 
   // Update layers for a page
   async update(pageId: string, layers: Layer[]): Promise<ApiResponse<PageLayers>> {
-    return apiRequest<PageLayers>(`/ycode/api/layers?page_id=${pageId}`, {
+    return apiRequest<PageLayers>(`/webwow/api/layers?page_id=${pageId}`, {
       method: 'PUT',
       body: JSON.stringify({ layers }),
     });
@@ -183,7 +183,7 @@ export const pageLayersApi = {
 
   // Get all draft (non-published) page layers in one query
   async getAllDrafts(): Promise<ApiResponse<PageLayers[]>> {
-    return apiRequest<PageLayers[]>('/ycode/api/pages/drafts');
+    return apiRequest<PageLayers[]>('/webwow/api/pages/drafts');
   },
 };
 
@@ -199,7 +199,7 @@ export const publishApi = {
     assets: number;
     total: number;
   }>> {
-    return apiRequest('/ycode/api/publish/preview');
+    return apiRequest('/webwow/api/publish/preview');
   },
 
   /**
@@ -228,7 +228,7 @@ export const publishApi = {
     };
     published_at_setting: Setting;
   }>> {
-    return apiRequest('/ycode/api/publish', {
+    return apiRequest('/webwow/api/publish', {
       method: 'POST',
       body: JSON.stringify(options),
     });
@@ -239,7 +239,7 @@ export const publishApi = {
     changes: Record<string, number | boolean>;
     cleaned: Record<string, number>;
   }>> {
-    return apiRequest('/ycode/api/revert', {
+    return apiRequest('/webwow/api/revert', {
       method: 'POST',
     });
   },
@@ -289,13 +289,13 @@ export const assetsApi = {
     if (folderId !== undefined) {
       params.set('folderId', folderId === null ? 'null' : folderId);
     }
-    const url = params.toString() ? `/ycode/api/assets?${params}` : '/ycode/api/assets';
+    const url = params.toString() ? `/webwow/api/assets?${params}` : '/webwow/api/assets';
     return apiRequest<Asset[]>(url);
   },
 
   // Create SVG asset from code
   async create(data: { filename: string; content: string; asset_folder_id?: string | null; source?: string }): Promise<ApiResponse<Asset>> {
-    return apiRequest<Asset>('/ycode/api/assets', {
+    return apiRequest<Asset>('/webwow/api/assets', {
       method: 'POST',
       body: JSON.stringify(data),
       headers: {
@@ -306,7 +306,7 @@ export const assetsApi = {
 
   // Update asset
   async update(id: string, data: { filename?: string; asset_folder_id?: string | null; content?: string | null }): Promise<ApiResponse<Asset>> {
-    return apiRequest<Asset>(`/ycode/api/assets/${id}`, {
+    return apiRequest<Asset>(`/webwow/api/assets/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
@@ -314,14 +314,14 @@ export const assetsApi = {
 
   // Delete asset
   async delete(id: string): Promise<ApiResponse<void>> {
-    return apiRequest<void>(`/ycode/api/assets/${id}`, {
+    return apiRequest<void>(`/webwow/api/assets/${id}`, {
       method: 'DELETE',
     });
   },
 
   // Bulk delete assets
   async bulkDelete(ids: string[]): Promise<ApiResponse<{ success: string[]; failed: string[] }>> {
-    return apiRequest<{ success: string[]; failed: string[] }>('/ycode/api/assets/bulk', {
+    return apiRequest<{ success: string[]; failed: string[] }>('/webwow/api/assets/bulk', {
       method: 'POST',
       body: JSON.stringify({ action: 'delete', ids }),
     });
@@ -329,7 +329,7 @@ export const assetsApi = {
 
   // Bulk move assets to folder
   async bulkMove(ids: string[], asset_folder_id: string | null): Promise<ApiResponse<{ success: string[]; failed: string[] }>> {
-    return apiRequest<{ success: string[]; failed: string[] }>('/ycode/api/assets/bulk', {
+    return apiRequest<{ success: string[]; failed: string[] }>('/webwow/api/assets/bulk', {
       method: 'POST',
       body: JSON.stringify({ action: 'move', ids, asset_folder_id }),
     });
@@ -337,7 +337,7 @@ export const assetsApi = {
 
   // Get asset usage with names
   async getUsage(id: string): Promise<ApiResponse<{ pages: { id: string; name: string }[]; components: { id: string; name: string }[]; cmsItems: { id: string; name: string; collectionId: string; collectionName: string }[]; total: number }>> {
-    return apiRequest<{ pages: { id: string; name: string }[]; components: { id: string; name: string }[]; cmsItems: { id: string; name: string; collectionId: string; collectionName: string }[]; total: number }>(`/ycode/api/assets/${id}/usage`);
+    return apiRequest<{ pages: { id: string; name: string }[]; components: { id: string; name: string }[]; cmsItems: { id: string; name: string; collectionId: string; collectionName: string }[]; total: number }>(`/webwow/api/assets/${id}/usage`);
   },
 };
 
@@ -345,12 +345,12 @@ export const assetsApi = {
 export const assetFoldersApi = {
   // Get all asset folders
   async getAll(): Promise<ApiResponse<AssetFolder[]>> {
-    return apiRequest<AssetFolder[]>('/ycode/api/asset-folders');
+    return apiRequest<AssetFolder[]>('/webwow/api/asset-folders');
   },
 
   // Create new asset folder
   async create(folder: { name: string; asset_folder_id?: string | null; depth?: number; order?: number; is_published?: boolean }): Promise<ApiResponse<AssetFolder>> {
-    return apiRequest<AssetFolder>('/ycode/api/asset-folders', {
+    return apiRequest<AssetFolder>('/webwow/api/asset-folders', {
       method: 'POST',
       body: JSON.stringify(folder),
     });
@@ -358,7 +358,7 @@ export const assetFoldersApi = {
 
   // Update asset folder
   async update(id: string, folder: Partial<AssetFolder>): Promise<ApiResponse<AssetFolder>> {
-    return apiRequest<AssetFolder>(`/ycode/api/asset-folders/${id}`, {
+    return apiRequest<AssetFolder>(`/webwow/api/asset-folders/${id}`, {
       method: 'PUT',
       body: JSON.stringify(folder),
     });
@@ -366,7 +366,7 @@ export const assetFoldersApi = {
 
   // Delete asset folder
   async delete(id: string): Promise<ApiResponse<void>> {
-    return apiRequest<void>(`/ycode/api/asset-folders/${id}`, {
+    return apiRequest<void>(`/webwow/api/asset-folders/${id}`, {
       method: 'DELETE',
     });
   },
@@ -376,11 +376,11 @@ export const assetFoldersApi = {
 export const setupApi = {
   // Get setup status
   async getStatus(): Promise<ApiResponse<{ isComplete: boolean; currentStep: string }>> {
-    return apiRequest<{ isComplete: boolean; currentStep: string }>('/ycode/api/setup/status');
+    return apiRequest<{ isComplete: boolean; currentStep: string }>('/webwow/api/setup/status');
   },
 
   async connectDatabase(databaseUrl: string): Promise<ApiResponse<{ success: boolean }>> {
-    return apiRequest<{ success: boolean }>('/ycode/api/setup/connect', {
+    return apiRequest<{ success: boolean }>('/webwow/api/setup/connect', {
       method: 'POST',
       body: JSON.stringify({ database_url: databaseUrl }),
     });
@@ -388,14 +388,14 @@ export const setupApi = {
 
   // Run migrations
   async runMigrations(): Promise<ApiResponse<{ success: boolean }>> {
-    return apiRequest<{ success: boolean }>('/ycode/api/setup/run-migrations', {
+    return apiRequest<{ success: boolean }>('/webwow/api/setup/run-migrations', {
       method: 'POST',
     });
   },
 
   // Complete setup
   async completeSetup(): Promise<ApiResponse<{ success: boolean }>> {
-    return apiRequest<{ success: boolean }>('/ycode/api/setup/complete', {
+    return apiRequest<{ success: boolean }>('/webwow/api/setup/complete', {
       method: 'POST',
     });
   },
@@ -405,11 +405,11 @@ export const setupApi = {
 export const collectionsApi = {
   // Collections
   async getAll(): Promise<ApiResponse<Collection[]>> {
-    return apiRequest<Collection[]>('/ycode/api/collections');
+    return apiRequest<Collection[]>('/webwow/api/collections');
   },
 
   async getById(id: string): Promise<ApiResponse<Collection>> {
-    return apiRequest<Collection>(`/ycode/api/collections/${id}`);
+    return apiRequest<Collection>(`/webwow/api/collections/${id}`);
   },
 
   async create(data: {
@@ -417,38 +417,38 @@ export const collectionsApi = {
     sorting?: Record<string, any> | null;
     order?: number;
   }): Promise<ApiResponse<Collection>> {
-    return apiRequest<Collection>('/ycode/api/collections', {
+    return apiRequest<Collection>('/webwow/api/collections', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
 
   async createSample(sampleId: string): Promise<ApiResponse<{ collection: Collection; fields: CollectionField[]; assets: Asset[]; items: CollectionItemWithValues[] }>> {
-    return apiRequest('/ycode/api/collections/sample', {
+    return apiRequest('/webwow/api/collections/sample', {
       method: 'POST',
       body: JSON.stringify({ sampleId }),
     });
   },
 
   async update(id: string, data: UpdateCollectionData): Promise<ApiResponse<Collection>> {
-    return apiRequest<Collection>(`/ycode/api/collections/${id}`, {
+    return apiRequest<Collection>(`/webwow/api/collections/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
   },
 
   async delete(id: string): Promise<ApiResponse<void>> {
-    return apiRequest<void>(`/ycode/api/collections/${id}`, {
+    return apiRequest<void>(`/webwow/api/collections/${id}`, {
       method: 'DELETE',
     });
   },
 
   async getUsage(id: string): Promise<ApiResponse<CollectionUsageResult>> {
-    return apiRequest(`/ycode/api/collections/${id}/usage`);
+    return apiRequest(`/webwow/api/collections/${id}/usage`);
   },
 
   async reorder(collectionIds: string[]): Promise<ApiResponse<{ success: boolean }>> {
-    return apiRequest<{ success: boolean }>('/ycode/api/collections/reorder', {
+    return apiRequest<{ success: boolean }>('/webwow/api/collections/reorder', {
       method: 'PUT',
       body: JSON.stringify({ collection_ids: collectionIds }),
     });
@@ -456,43 +456,43 @@ export const collectionsApi = {
 
   // Fields
   async getAllFields(): Promise<ApiResponse<CollectionField[]>> {
-    return apiRequest<CollectionField[]>('/ycode/api/collections/fields');
+    return apiRequest<CollectionField[]>('/webwow/api/collections/fields');
   },
 
   async getFields(collectionId: string, search?: string): Promise<ApiResponse<CollectionField[]>> {
     const params = new URLSearchParams();
     if (search) params.append('search', search);
     const queryString = params.toString();
-    const url = `/ycode/api/collections/${collectionId}/fields${queryString ? `?${queryString}` : ''}`;
+    const url = `/webwow/api/collections/${collectionId}/fields${queryString ? `?${queryString}` : ''}`;
     return apiRequest<CollectionField[]>(url);
   },
 
   async createField(collectionId: string, data: Omit<CreateCollectionFieldData, 'collection_id' | 'is_published'>): Promise<ApiResponse<CollectionField>> {
-    return apiRequest<CollectionField>(`/ycode/api/collections/${collectionId}/fields`, {
+    return apiRequest<CollectionField>(`/webwow/api/collections/${collectionId}/fields`, {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
 
   async updateField(collectionId: string, fieldId: string, data: UpdateCollectionFieldData): Promise<ApiResponse<CollectionField>> {
-    return apiRequest<CollectionField>(`/ycode/api/collections/${collectionId}/fields/${fieldId}`, {
+    return apiRequest<CollectionField>(`/webwow/api/collections/${collectionId}/fields/${fieldId}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
   },
 
   async deleteField(collectionId: string, fieldId: string): Promise<ApiResponse<void>> {
-    return apiRequest<void>(`/ycode/api/collections/${collectionId}/fields/${fieldId}`, {
+    return apiRequest<void>(`/webwow/api/collections/${collectionId}/fields/${fieldId}`, {
       method: 'DELETE',
     });
   },
 
   async getFieldUsage(collectionId: string, fieldId: string): Promise<ApiResponse<CollectionFieldUsageResult>> {
-    return apiRequest(`/ycode/api/collections/${collectionId}/fields/${fieldId}/usage`);
+    return apiRequest(`/webwow/api/collections/${collectionId}/fields/${fieldId}/usage`);
   },
 
   async reorderFields(collectionId: string, fieldIds: string[]): Promise<ApiResponse<{ success: boolean }>> {
-    return apiRequest<{ success: boolean }>(`/ycode/api/collections/${collectionId}/fields/reorder`, {
+    return apiRequest<{ success: boolean }>(`/webwow/api/collections/${collectionId}/fields/reorder`, {
       method: 'PUT',
       body: JSON.stringify({ field_ids: fieldIds }),
     });
@@ -503,7 +503,7 @@ export const collectionsApi = {
     collectionIds: string[],
     limit: number = 25
   ): Promise<ApiResponse<{ items: Record<string, { items: CollectionItemWithValues[] }> }>> {
-    return apiRequest('/ycode/api/collections/items/batch', {
+    return apiRequest('/webwow/api/collections/items/batch', {
       method: 'POST',
       body: JSON.stringify({ collectionIds, limit }),
     });
@@ -530,44 +530,44 @@ export const collectionsApi = {
     if (options?.offset !== undefined) params.append('offset', options.offset.toString());
     if (options?.filters?.length) params.append('filters', JSON.stringify(options.filters));
     const queryString = params.toString();
-    const url = `/ycode/api/collections/${collectionId}/items${queryString ? `?${queryString}` : ''}`;
+    const url = `/webwow/api/collections/${collectionId}/items${queryString ? `?${queryString}` : ''}`;
     return apiRequest<{ items: CollectionItemWithValues[]; total: number; page: number; limit: number }>(url);
   },
 
   async getItemById(collectionId: string, itemId: string): Promise<ApiResponse<CollectionItemWithValues>> {
-    return apiRequest<CollectionItemWithValues>(`/ycode/api/collections/${collectionId}/items/${itemId}`);
+    return apiRequest<CollectionItemWithValues>(`/webwow/api/collections/${collectionId}/items/${itemId}`);
   },
 
   async createItem(collectionId: string, values: Record<string, any>, statusAction?: StatusAction): Promise<ApiResponse<CollectionItemWithValues>> {
-    return apiRequest<CollectionItemWithValues>(`/ycode/api/collections/${collectionId}/items`, {
+    return apiRequest<CollectionItemWithValues>(`/webwow/api/collections/${collectionId}/items`, {
       method: 'POST',
       body: JSON.stringify({ values, ...(statusAction && { status_action: statusAction }) }),
     });
   },
 
   async updateItem(collectionId: string, itemId: string, values: Record<string, any>): Promise<ApiResponse<CollectionItemWithValues>> {
-    return apiRequest<CollectionItemWithValues>(`/ycode/api/collections/${collectionId}/items/${itemId}`, {
+    return apiRequest<CollectionItemWithValues>(`/webwow/api/collections/${collectionId}/items/${itemId}`, {
       method: 'PUT',
       body: JSON.stringify({ values }),
     });
   },
 
   async setItemPublishable(collectionId: string, itemId: string, is_publishable: boolean): Promise<ApiResponse<CollectionItemWithValues>> {
-    return apiRequest<CollectionItemWithValues>(`/ycode/api/collections/${collectionId}/items/${itemId}`, {
+    return apiRequest<CollectionItemWithValues>(`/webwow/api/collections/${collectionId}/items/${itemId}`, {
       method: 'PUT',
       body: JSON.stringify({ is_publishable }),
     });
   },
 
   async setItemStatus(collectionId: string, itemId: string, action: StatusAction): Promise<ApiResponse<CollectionItemWithValues>> {
-    return apiRequest<CollectionItemWithValues>(`/ycode/api/collections/${collectionId}/items/${itemId}/status`, {
+    return apiRequest<CollectionItemWithValues>(`/webwow/api/collections/${collectionId}/items/${itemId}/status`, {
       method: 'PUT',
       body: JSON.stringify({ action }),
     });
   },
 
   async deleteItem(collectionId: string, itemId: string): Promise<ApiResponse<void>> {
-    return apiRequest<void>(`/ycode/api/collections/${collectionId}/items/${itemId}`, {
+    return apiRequest<void>(`/webwow/api/collections/${collectionId}/items/${itemId}`, {
       method: 'DELETE',
     });
   },
@@ -584,23 +584,23 @@ export const collectionsApi = {
     if (options?.limit) params.append('limit', options.limit.toString());
     if (options?.sortBy) params.append('sortBy', options.sortBy);
     if (options?.sortOrder) params.append('sortOrder', options.sortOrder);
-    const url = `/ycode/api/collections/${collectionId}/items?${params.toString()}`;
+    const url = `/webwow/api/collections/${collectionId}/items?${params.toString()}`;
     return apiRequest<{ items: CollectionItemWithValues[]; total: number; page: number; limit: number }>(url);
   },
 
   // Published items
   async getPublishedItems(collectionId: string): Promise<ApiResponse<CollectionItemWithValues[]>> {
-    return apiRequest<CollectionItemWithValues[]>(`/ycode/api/collections/${collectionId}/items/published`);
+    return apiRequest<CollectionItemWithValues[]>(`/webwow/api/collections/${collectionId}/items/published`);
   },
 
   // Unpublished items for a collection
   async getUnpublishedItems(collectionId: string): Promise<ApiResponse<CollectionItemWithValues[]>> {
-    return apiRequest<CollectionItemWithValues[]>(`/ycode/api/collections/${collectionId}/items/unpublished`);
+    return apiRequest<CollectionItemWithValues[]>(`/webwow/api/collections/${collectionId}/items/unpublished`);
   },
 
   // Publish individual items
   async publishItems(itemIds: string[]): Promise<ApiResponse<{ count: number }>> {
-    return apiRequest<{ count: number }>('/ycode/api/collections/items/publish', {
+    return apiRequest<{ count: number }>('/webwow/api/collections/items/publish', {
       method: 'POST',
       body: JSON.stringify({ item_ids: itemIds }),
     });
@@ -608,7 +608,7 @@ export const collectionsApi = {
 
   // Bulk delete items
   async bulkDeleteItems(itemIds: string[]): Promise<ApiResponse<{ deleted: number; errors?: string[] }>> {
-    return apiRequest<{ deleted: number; errors?: string[] }>('/ycode/api/collections/items/delete', {
+    return apiRequest<{ deleted: number; errors?: string[] }>('/webwow/api/collections/items/delete', {
       method: 'POST',
       body: JSON.stringify({ item_ids: itemIds }),
     });
@@ -616,14 +616,14 @@ export const collectionsApi = {
 
   // Duplicate item
   async duplicateItem(collectionId: string, itemId: string): Promise<ApiResponse<CollectionItemWithValues>> {
-    return apiRequest<CollectionItemWithValues>(`/ycode/api/collections/${collectionId}/items/${itemId}/duplicate`, {
+    return apiRequest<CollectionItemWithValues>(`/webwow/api/collections/${collectionId}/items/${itemId}/duplicate`, {
       method: 'POST',
     });
   },
 
   // Reorder items (bulk update manual_order)
   async reorderItems(collectionId: string, updates: Array<{ id: string; manual_order: number }>): Promise<ApiResponse<{ updated: number }>> {
-    return apiRequest<{ updated: number }>(`/ycode/api/collections/${collectionId}/items/reorder`, {
+    return apiRequest<{ updated: number }>(`/webwow/api/collections/${collectionId}/items/reorder`, {
       method: 'POST',
       body: JSON.stringify({ updates }),
     });
@@ -634,12 +634,12 @@ export const collectionsApi = {
 export const componentsApi = {
   // Get unpublished components
   async getUnpublished(): Promise<ApiResponse<Component[]>> {
-    return apiRequest<Component[]>('/ycode/api/components/unpublished');
+    return apiRequest<Component[]>('/webwow/api/components/unpublished');
   },
 
   // Create a new component
   async create(data: { name: string; layers: Layer[]; variables?: any[] }): Promise<ApiResponse<Component>> {
-    return apiRequest<Component>('/ycode/api/components', {
+    return apiRequest<Component>('/webwow/api/components', {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -650,7 +650,7 @@ export const componentsApi = {
     const formData = new FormData();
     formData.append('image', blob, 'thumbnail.png');
 
-    const response = await fetch(`/ycode/api/components/${id}/thumbnail`, {
+    const response = await fetch(`/webwow/api/components/${id}/thumbnail`, {
       method: 'POST',
       body: formData,
     });
@@ -671,7 +671,7 @@ export const componentsApi = {
 export const layerStylesApi = {
   // Get unpublished layer styles
   async getUnpublished(): Promise<ApiResponse<LayerStyle[]>> {
-    return apiRequest<LayerStyle[]>('/ycode/api/layer-styles/unpublished');
+    return apiRequest<LayerStyle[]>('/webwow/api/layer-styles/unpublished');
   },
 };
 
@@ -691,7 +691,7 @@ export const editorApi = {
     assetFolders: AssetFolder[];
     fonts: Font[];
   }>> {
-    return apiRequest('/ycode/api/editor/init');
+    return apiRequest('/webwow/api/editor/init');
   },
 };
 
@@ -699,60 +699,60 @@ export const editorApi = {
 export const localisationApi = {
   // Locales
   async getLocales(): Promise<ApiResponse<Locale[]>> {
-    return apiRequest<Locale[]>('/ycode/api/locales');
+    return apiRequest<Locale[]>('/webwow/api/locales');
   },
 
   async getLocaleById(id: string): Promise<ApiResponse<Locale>> {
-    return apiRequest<Locale>(`/ycode/api/locales/${id}`);
+    return apiRequest<Locale>(`/webwow/api/locales/${id}`);
   },
 
   async createLocale(data: CreateLocaleData): Promise<ApiResponse<{ locale: Locale; locales: Locale[] }>> {
-    return apiRequest<{ locale: Locale; locales: Locale[] }>('/ycode/api/locales', {
+    return apiRequest<{ locale: Locale; locales: Locale[] }>('/webwow/api/locales', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
 
   async updateLocale(id: string, data: UpdateLocaleData): Promise<ApiResponse<{ locale: Locale; locales: Locale[] }>> {
-    return apiRequest<{ locale: Locale; locales: Locale[] }>(`/ycode/api/locales/${id}`, {
+    return apiRequest<{ locale: Locale; locales: Locale[] }>(`/webwow/api/locales/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
   },
 
   async deleteLocale(id: string): Promise<ApiResponse<void>> {
-    return apiRequest<void>(`/ycode/api/locales/${id}`, {
+    return apiRequest<void>(`/webwow/api/locales/${id}`, {
       method: 'DELETE',
     });
   },
 
   async setDefaultLocale(id: string): Promise<ApiResponse<Locale>> {
-    return apiRequest<Locale>(`/ycode/api/locales/${id}/default`, {
+    return apiRequest<Locale>(`/webwow/api/locales/${id}/default`, {
       method: 'POST',
     });
   },
 
   // Translations
   async getTranslations(localeId: string): Promise<ApiResponse<Translation[]>> {
-    return apiRequest<Translation[]>(`/ycode/api/translations?locale_id=${localeId}`);
+    return apiRequest<Translation[]>(`/webwow/api/translations?locale_id=${localeId}`);
   },
 
   async createTranslation(data: CreateTranslationData): Promise<ApiResponse<Translation>> {
-    return apiRequest<Translation>('/ycode/api/translations', {
+    return apiRequest<Translation>('/webwow/api/translations', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
 
   async updateTranslation(id: string, data: UpdateTranslationData): Promise<ApiResponse<Translation>> {
-    return apiRequest<Translation>(`/ycode/api/translations/${id}`, {
+    return apiRequest<Translation>(`/webwow/api/translations/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
   },
 
   async deleteTranslation(id: string): Promise<ApiResponse<void>> {
-    return apiRequest<void>(`/ycode/api/translations/${id}`, {
+    return apiRequest<void>(`/webwow/api/translations/${id}`, {
       method: 'DELETE',
     });
   },
@@ -765,7 +765,7 @@ export const settingsApi = {
    * @param settings - Object with key-value pairs to store
    */
   async batchUpdate(settings: Record<string, any>): Promise<ApiResponse<{ count: number }>> {
-    return apiRequest<{ count: number }>('/ycode/api/settings/batch', {
+    return apiRequest<{ count: number }>('/webwow/api/settings/batch', {
       method: 'PUT',
       body: JSON.stringify({ settings }),
     });
@@ -779,7 +779,7 @@ export const cacheApi = {
    * Should be called after publishing content
    */
   async clearAll(): Promise<ApiResponse<{ success: boolean }>> {
-    return apiRequest<{ success: boolean }>('/ycode/api/cache/clear-all', {
+    return apiRequest<{ success: boolean }>('/webwow/api/cache/clear-all', {
       method: 'POST',
     });
   },
@@ -816,7 +816,7 @@ export async function uploadFileApi(
       formData.append('asset_folder_id', assetFolderId);
     }
 
-    const response = await fetch('/ycode/api/files/upload', {
+    const response = await fetch('/webwow/api/files/upload', {
       method: 'POST',
       body: formData,
     });
@@ -837,31 +837,31 @@ export async function uploadFileApi(
 // Color Variables API
 export const colorVariablesApi = {
   async getAll(): Promise<ApiResponse<import('@/types').ColorVariable[]>> {
-    return apiRequest<import('@/types').ColorVariable[]>('/ycode/api/color-variables');
+    return apiRequest<import('@/types').ColorVariable[]>('/webwow/api/color-variables');
   },
 
   async create(data: { name: string; value: string }): Promise<ApiResponse<import('@/types').ColorVariable>> {
-    return apiRequest<import('@/types').ColorVariable>('/ycode/api/color-variables', {
+    return apiRequest<import('@/types').ColorVariable>('/webwow/api/color-variables', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
 
   async update(id: string, data: { name?: string; value?: string }): Promise<ApiResponse<import('@/types').ColorVariable>> {
-    return apiRequest<import('@/types').ColorVariable>(`/ycode/api/color-variables/${id}`, {
+    return apiRequest<import('@/types').ColorVariable>(`/webwow/api/color-variables/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
   },
 
   async delete(id: string): Promise<ApiResponse<void>> {
-    return apiRequest<void>(`/ycode/api/color-variables/${id}`, {
+    return apiRequest<void>(`/webwow/api/color-variables/${id}`, {
       method: 'DELETE',
     });
   },
 
   async reorder(orderedIds: string[]): Promise<ApiResponse<{ success: boolean }>> {
-    return apiRequest<{ success: boolean }>('/ycode/api/color-variables/reorder', {
+    return apiRequest<{ success: boolean }>('/webwow/api/color-variables/reorder', {
       method: 'PUT',
       body: JSON.stringify({ orderedIds }),
     });
@@ -877,7 +877,7 @@ export const colorVariablesApi = {
 export async function deleteAssetApi(assetId: string): Promise<boolean> {
   try {
     const response = await fetch(
-      `/ycode/api/files/delete?assetId=${encodeURIComponent(assetId)}`,
+      `/webwow/api/files/delete?assetId=${encodeURIComponent(assetId)}`,
       { method: 'DELETE' }
     );
 

@@ -1,35 +1,35 @@
 /* Editor-specific styles - using outline to prevent conflicts with user box-shadow */
-.ycode-selected {
+.webwow-selected {
   outline: 1px solid #0b7efd !important;
   outline-offset: -1px;
 }
 
-.ycode-selected-purple {
+.webwow-selected-purple {
   outline: 2px solid #a855f7 !important;
   outline-offset: -2px;
 }
 
-.ycode-hover {
+.webwow-hover {
   outline: 1px solid #0b7efd !important;
   outline-offset: -1px;
 }
 
-.ycode-hover-purple {
+.webwow-hover-purple {
   outline: 1px solid rgba(168, 85, 247, 0.3) !important;
   outline-offset: -1px;
 }
 
-.ycode-component-hover {
+.webwow-component-hover {
   outline: 2px solid rgba(168, 85, 247, 0.5) !important;
   outline-offset: -2px;
 }
 
-.ycode-editing {
+.webwow-editing {
   outline: 1px solid #0b7efd !important;
   outline-offset: -1px;
 }
 
-.ycode-drop-target {
+.webwow-drop-target {
   outline: 2px solid #3b82f6 !important;
   outline-offset: -2px;
   background-color: rgba(59, 130, 246, 0.05) !important;
@@ -39,13 +39,13 @@
 /* Force default cursor on all elements in canvas edit mode */
 #canvas-body,
 #canvas-body *,
-.ycode-layer,
-.ycode-layer * {
+.webwow-layer,
+.webwow-layer * {
   cursor: default !important;
 }
 
 /* Empty element styling (exclude void/form elements and layers with visible border/background) */
-.ycode-layer:empty:not(input):not(select):not(textarea):not(img):not(br):not(hr):not([data-has-visual])::before {
+.webwow-layer:empty:not(input):not(select):not(textarea):not(img):not(br):not(hr):not([data-has-visual])::before {
   content: ' ';
   display: block;
   background-color: rgb(191 219 254 / 0.1);
@@ -113,20 +113,20 @@
 }
 
 /* Text editing input */
-.ycode-text-editor {
+.webwow-text-editor {
   width: 100%;
   outline: 1px solid #0b7efd !important;
   outline-offset: 0 !important;
   cursor: text !important;
 }
 
-.ycode-text-editor * {
+.webwow-text-editor * {
   cursor: text !important;
 }
 
 /* Hide ProseMirror trailing breaks in text editor */
-.ycode-text-editor img.ProseMirror-separator,
-.ycode-text-editor br.ProseMirror-trailingBreak {
+.webwow-text-editor img.ProseMirror-separator,
+.webwow-text-editor br.ProseMirror-trailingBreak {
   display: inline !important;
 }
 

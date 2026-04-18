@@ -63,8 +63,8 @@ export function TemplateApplyDialog({
       onOpenChange(false);
       onSuccess?.();
 
-      // Navigate to /ycode to refresh the whole app with new content
-      window.location.href = '/ycode';
+      // Navigate to /webwow to refresh the whole app with new content
+      window.location.href = '/webwow';
     } catch (err) {
       console.error('[TemplateApplyDialog] Error:', err);
       setError(err instanceof Error ? err.message : 'Failed to apply template');

@@ -3,15 +3,15 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ycode
-      POSTGRES_USER: ycode
-      POSTGRES_PASSWORD: ycode_password
+      POSTGRES_DB: webwow
+      POSTGRES_USER: webwow
+      POSTGRES_PASSWORD: webwow_password
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ycode"]
+      test: ["CMD-SHELL", "pg_isready -U webwow"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -22,7 +22,7 @@ services:
     ports:
       - "3002:3002"
     environment:
-      DATABASE_URL: postgresql://ycode:ycode_password@db:5432/ycode
+      DATABASE_URL: postgresql://webwow:webwow_password@db:5432/webwow
       ADMIN_PASSWORD: changeme
       PAGE_AUTH_SECRET: bitte-aendern-mit-openssl-rand-hex-32
       UPLOAD_DIR: /app/uploads

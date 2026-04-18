@@ -50,8 +50,8 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        // Apply to public pages ONLY (exclude /ycode/*, /_next/*, /a/*)
-        source: '/:path((?!ycode|_next|a/).*)*',
+        // Apply to public pages ONLY (exclude /webwow/*, /_next/*, /a/*)
+        source: '/:path((?!webwow|_next|a/).*)*',
         headers: [
           {
             key: 'Cache-Control',

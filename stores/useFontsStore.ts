@@ -72,7 +72,7 @@ export const useFontsStore = create<FontsStore>((set, get) => ({
     set({ isLoading: true, error: null });
 
     try {
-      const response = await fetch('/ycode/api/fonts');
+      const response = await fetch('/webwow/api/fonts');
       if (!response.ok) throw new Error('Failed to fetch fonts');
 
       const { data: fonts } = await response.json();
@@ -123,7 +123,7 @@ export const useFontsStore = create<FontsStore>((set, get) => ({
         formData.append('file', file);
       }
 
-      const response = await fetch('/ycode/api/fonts', {
+      const response = await fetch('/webwow/api/fonts', {
         method: 'POST',
         body: formData,
       });
@@ -193,7 +193,7 @@ export const useFontsStore = create<FontsStore>((set, get) => ({
         payload.axes = googleFont.axes;
       }
 
-      const response = await fetch('/ycode/api/fonts', {
+      const response = await fetch('/webwow/api/fonts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -223,7 +223,7 @@ export const useFontsStore = create<FontsStore>((set, get) => ({
   /** Delete a font */
   deleteFont: async (fontId: string) => {
     try {
-      const response = await fetch(`/ycode/api/fonts/${fontId}`, {
+      const response = await fetch(`/webwow/api/fonts/${fontId}`, {
         method: 'DELETE',
       });
 
@@ -243,7 +243,7 @@ export const useFontsStore = create<FontsStore>((set, get) => ({
     if (get().isCatalogLoaded) return;
 
     try {
-      const response = await fetch('/ycode/api/fonts/google');
+      const response = await fetch('/webwow/api/fonts/google');
       if (!response.ok) throw new Error('Failed to load Google Fonts catalog');
 
       const { data } = await response.json();
@@ -288,7 +288,7 @@ export const useFontsStore = create<FontsStore>((set, get) => ({
    */
   injectFontsCss: (iframeDocument?: Document | null) => {
     const { fonts, fontsCss } = get();
-    const styleId = 'ycode-fonts-style';
+    const styleId = 'webwow-fonts-style';
 
     // Inject into main document (builder)
     injectStyleIntoDocument(document, styleId, fontsCss);
@@ -339,7 +339,7 @@ function injectStyleIntoDocument(doc: Document, styleId: string, css: string) {
  * especially in cross-origin iframe contexts.
  */
 function injectGoogleFontLinks(doc: Document, fonts: Font[]) {
-  const prefix = 'ycode-gfont-';
+  const prefix = 'webwow-gfont-';
   const googleFonts = fonts.filter(f => f.type === 'google');
 
   // Track which links already exist

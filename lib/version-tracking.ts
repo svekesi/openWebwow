@@ -267,7 +267,7 @@ export async function recordVersionViaApi(
   };
 
   try {
-    const response = await fetch('/ycode/api/versions', {
+    const response = await fetch('/webwow/api/versions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(versionData),
@@ -308,10 +308,10 @@ export async function recordVersionViaApi(
 function getSessionId(): string {
   if (typeof window === 'undefined') return 'server';
 
-  let sessionId = sessionStorage.getItem('ycode-session-id');
+  let sessionId = sessionStorage.getItem('webwow-session-id');
   if (!sessionId) {
     sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    sessionStorage.setItem('ycode-session-id', sessionId);
+    sessionStorage.setItem('webwow-session-id', sessionId);
   }
   return sessionId;
 }

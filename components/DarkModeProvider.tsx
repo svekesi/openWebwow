@@ -10,14 +10,14 @@ import { useEffect } from 'react';
  * based on the current pathname. This avoids using headers() in
  * the root layout which would force all pages to be dynamic.
  * 
- * Dark mode is applied for /ycode/* routes except /ycode/preview/*
+ * Dark mode is applied for /webwow/* routes except /webwow/preview/*
  */
 export default function DarkModeProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   
   useEffect(() => {
-    const isPreviewRoute = pathname?.startsWith('/ycode/preview');
-    const isDarkMode = !isPreviewRoute && pathname?.startsWith('/ycode');
+    const isPreviewRoute = pathname?.startsWith('/webwow/preview');
+    const isDarkMode = !isPreviewRoute && pathname?.startsWith('/webwow');
     
     if (isDarkMode) {
       document.documentElement.classList.add('dark');

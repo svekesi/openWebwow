@@ -1,5 +1,5 @@
 /**
- * Ycode Type Definitions
+ * Webwow Type Definitions
  *
  * Core types for pages, layers, and editor functionality
  */

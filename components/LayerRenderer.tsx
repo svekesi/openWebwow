@@ -27,8 +27,8 @@ import { toast } from 'sonner';
 import { resolveInlineVariablesFromData } from '@/lib/inline-variables';
 import { renderRichText, hasBlockElementsWithInlineVariables, getTextStyleClasses, flattenTiptapParagraphs, type RichTextLinkContext, type RenderComponentBlockFn } from '@/lib/text-format-utils';
 import { hasComponentOrVariable } from '@/lib/tiptap-utils';
-import LayerContextMenu from '@/app/ycode/components/LayerContextMenu';
-import CanvasTextEditor from '@/app/ycode/components/CanvasTextEditor';
+import LayerContextMenu from '@/app/webwow/components/LayerContextMenu';
+import CanvasTextEditor from '@/app/webwow/components/CanvasTextEditor';
 import { useComponentsStore } from '@/stores/useComponentsStore';
 import { useCollectionLayerStore } from '@/stores/useCollectionLayerStore';
 import { useFilterStore } from '@/stores/useFilterStore';
@@ -108,7 +108,7 @@ interface LayerRendererProps {
   pages?: any[]; // Pages for link resolution
   folders?: any[]; // Folders for link resolution
   collectionItemSlugs?: Record<string, string>; // Maps collection_item_id -> slug value for link resolution
-  isPreview?: boolean; // Whether we're in preview mode (prefix links with /ycode/preview)
+  isPreview?: boolean; // Whether we're in preview mode (prefix links with /webwow/preview)
   translations?: Record<string, any> | null; // Translations for localized URL generation
   anchorMap?: Record<string, string>; // Pre-built map of layerId -> anchor value for O(1) lookups
   /** Pre-resolved assets (asset_id -> { url, width, height }) for SSR resolution */
@@ -886,7 +886,7 @@ const LayerItem: React.FC<{
     if (textVariable?.type === 'dynamic_text') {
       const content = textVariable.data.content;
       if (typeof content === 'string') {
-        if (content.includes('<ycode-inline-variable>')) {
+        if (content.includes('<webwow-inline-variable>')) {
           return resolveInlineVariablesFromData(content, collectionLayerData, pageCollectionItemData ?? undefined, timezone, effectiveLayerDataMap);
         }
         return content;
@@ -946,7 +946,7 @@ const LayerItem: React.FC<{
 
   // Get image alt text, resolve inline variables, and apply translation if available
   const rawImageAlt = getDynamicTextContent(effectiveImageSettings?.alt) || 'Image';
-  const originalImageAlt = rawImageAlt.includes('<ycode-inline-variable>')
+  const originalImageAlt = rawImageAlt.includes('<webwow-inline-variable>')
     ? resolveInlineVariablesFromData(rawImageAlt, collectionLayerData, pageCollectionItemData ?? undefined, timezone, effectiveLayerDataMap)
     : rawImageAlt;
   const translatedImageAlt = getTranslatedText(
@@ -1424,7 +1424,7 @@ const LayerItem: React.FC<{
     isDragging && 'opacity-30',
     showProjection && 'outline outline-1 outline-dashed outline-blue-400 bg-blue-50/10',
     isLockedByOther && 'opacity-90 pointer-events-none select-none',
-    'ycode-layer'
+    'webwow-layer'
   ) : clsx(classesString, paragraphClasses, SWIPER_CLASS_MAP[layer.name], isSlideChild && 'swiper-slide', buttonNeedsFit && 'w-fit');
 
   // Check if layer should be hidden (hide completely in both edit mode and public pages)
@@ -2113,7 +2113,7 @@ const LayerItem: React.FC<{
         });
 
         try {
-          const response = await fetch('/ycode/api/form-submissions', {
+          const response = await fetch('/webwow/api/form-submissions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2715,7 +2715,7 @@ const LayerItem: React.FC<{
     if (layer.name === 'localeSelector' && !isEditMode && availableLocales && availableLocales.length > 0) {
       // Extract current page slug from URL (LocaleSelector handles this internally)
       const currentPageSlug = typeof window !== 'undefined'
-        ? window.location.pathname.slice(1).replace(/^ycode\/preview\/?/, '')
+        ? window.location.pathname.slice(1).replace(/^webwow\/preview\/?/, '')
         : '';
 
       // Get format setting from this layer to pass to children

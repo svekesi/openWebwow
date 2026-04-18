@@ -10,7 +10,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'Ycode - Visual Website Builder',
+  title: 'Webwow - Visual Website Builder',
   description: 'Self-hosted visual website builder',
 };
 

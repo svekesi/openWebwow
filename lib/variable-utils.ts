@@ -326,7 +326,7 @@ export function getImageUrlFromVariable(
   if (isDynamicTextVariable(src)) {
     const content = src.data.content;
     // Resolve inline variables if present
-    if (content.includes('<ycode-inline-variable>')) {
+    if (content.includes('<webwow-inline-variable>')) {
       return resolveInlineVariablesFromData(content, collectionItemData, pageCollectionItemData);
     }
     return content;
@@ -403,7 +403,7 @@ export function getVideoUrlFromVariable(
   if (isDynamicTextVariable(src)) {
     const content = src.data.content;
     // Resolve inline variables if present
-    if (content.includes('<ycode-inline-variable>')) {
+    if (content.includes('<webwow-inline-variable>')) {
       return resolveInlineVariablesFromData(content, collectionItemData, pageCollectionItemData);
     }
     return content;

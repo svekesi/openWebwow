@@ -116,7 +116,7 @@ interface PageRendererProps {
   gaMeasurementId?: string | null;
   globalCustomCodeHead?: string | null;
   globalCustomCodeBody?: string | null;
-  ycodeBadge?: boolean;
+  webwowBadge?: boolean;
   passwordProtection?: PasswordProtectionContext;
 }
 
@@ -156,7 +156,7 @@ export default async function PageRenderer({
   gaMeasurementId,
   globalCustomCodeHead,
   globalCustomCodeBody,
-  ycodeBadge = false,
+  webwowBadge = false,
   passwordProtection,
 }: PageRendererProps) {
   // Check if this is a 401 error page that needs password form
@@ -325,14 +325,14 @@ export default async function PageRenderer({
 
       {/* Strip native browser appearance from form elements so Tailwind classes apply */}
       <style
-        id="ycode-form-reset"
+        id="webwow-form-reset"
         dangerouslySetInnerHTML={{ __html: 'input,select,textarea{appearance:none;-webkit-appearance:none}input[type="checkbox"]:checked,input[type="radio"]:checked{background-color:currentColor;border-color:transparent;background-size:100% 100%;background-position:center;background-repeat:no-repeat}input[type="checkbox"]:checked{background-image:url("data:image/svg+xml,%3csvg viewBox=\'0 0 16 16\' fill=\'white\' xmlns=\'http://www.w3.org/2000/svg\'%3e%3cpath d=\'M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z\'/%3e%3c/svg%3e")}input[type="radio"]:checked{background-image:url("data:image/svg+xml,%3csvg viewBox=\'0 0 16 16\' fill=\'white\' xmlns=\'http://www.w3.org/2000/svg\'%3e%3ccircle cx=\'8\' cy=\'8\' r=\'3\'/%3e%3c/svg%3e")}' }}
       />
 
       {/* Inject CSS directly — React 19 hoists <style> with precedence to <head> */}
       {generatedCss && (
         <style
-          id="ycode-styles"
+          id="webwow-styles"
           dangerouslySetInnerHTML={{ __html: generatedCss }}
         />
       )}
@@ -340,7 +340,7 @@ export default async function PageRenderer({
       {/* Inject color variable CSS custom properties */}
       {colorVariablesCss && (
         <style
-          id="ycode-color-vars"
+          id="webwow-color-vars"
           dangerouslySetInnerHTML={{ __html: colorVariablesCss }}
         />
       )}
@@ -357,7 +357,7 @@ export default async function PageRenderer({
       {/* Inject custom font @font-face rules and font class CSS */}
       {fontsCss && (
         <style
-          id="ycode-fonts"
+          id="webwow-fonts"
           dangerouslySetInnerHTML={{ __html: fontsCss }}
         />
       )}
@@ -365,7 +365,7 @@ export default async function PageRenderer({
       {/* Inject initial animation styles to prevent flickering */}
       {initialAnimationCSS && (
         <style
-          id="ycode-gsap-initial-styles"
+          id="webwow-gsap-initial-styles"
           dangerouslySetInnerHTML={{ __html: initialAnimationCSS }}
         />
       )}

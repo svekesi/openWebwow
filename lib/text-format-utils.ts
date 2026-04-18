@@ -1038,7 +1038,7 @@ export function tiptapContentToString(content: any): string {
     } else if (node.type === 'dynamicVariable') {
       // Convert variable node to inline variable tag
       if (node.attrs?.variable) {
-        result += `<ycode-inline-variable>${JSON.stringify(node.attrs.variable)}</ycode-inline-variable>`;
+        result += `<webwow-inline-variable>${JSON.stringify(node.attrs.variable)}</webwow-inline-variable>`;
       }
     } else if (node.content && Array.isArray(node.content)) {
       node.content.forEach(processNode);
@@ -1058,7 +1058,7 @@ export function tiptapContentToString(content: any): string {
  */
 export function stringToTiptapContent(text: string): any {
   const content: any[] = [];
-  const regex = /<ycode-inline-variable>([\s\S]*?)<\/ycode-inline-variable>/g;
+  const regex = /<webwow-inline-variable>([\s\S]*?)<\/webwow-inline-variable>/g;
   let lastIndex = 0;
   let match;
 

@@ -20,10 +20,10 @@ import {
 
 function getSessionId(): string {
   if (typeof window !== 'undefined') {
-    let id = sessionStorage.getItem('ycode_session_id');
+    let id = sessionStorage.getItem('webwow_session_id');
     if (!id) {
       id = crypto.randomUUID();
-      sessionStorage.setItem('ycode_session_id', id);
+      sessionStorage.setItem('webwow_session_id', id);
     }
     return id;
   }

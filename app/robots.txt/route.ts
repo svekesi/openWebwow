@@ -31,7 +31,7 @@ export async function GET() {
       const fallback = `# Default robots.txt
 User-agent: *
 Allow: /
-Disallow: /ycode/
+Disallow: /webwow/
 
 # Sitemap
 Sitemap: ${baseUrl}/sitemap.xml`;
@@ -71,7 +71,7 @@ User-agent: *
 Allow: /
 
 # Disallow admin/editor paths
-Disallow: /ycode/`;
+Disallow: /webwow/`;
 
       // Add sitemap reference if enabled
       if (sitemapEnabled) {
@@ -91,7 +91,7 @@ Disallow: /ycode/`;
     // Return default on error
     const fallback = `User-agent: *
 Allow: /
-Disallow: /ycode/`;
+Disallow: /webwow/`;
 
     return new NextResponse(fallback, {
       headers: {

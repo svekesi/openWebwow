@@ -20,7 +20,7 @@ export default function LocaleSelector({
   isPublished,
 }: LocaleSelectorProps) {
   // Detect if we're in preview mode
-  const isPreviewMode = typeof window !== 'undefined' && window.location.pathname.startsWith('/ycode/preview');
+  const isPreviewMode = typeof window !== 'undefined' && window.location.pathname.startsWith('/webwow/preview');
 
   // Get default locale (fallback when no locale is detected)
   const defaultLocale = availableLocales.find(l => l.is_default) || availableLocales[0];
@@ -89,6 +89,6 @@ function buildLocalizedUrl(
     : pathWithoutLocale ? `${targetLocale.code}/${pathWithoutLocale}` : targetLocale.code;
 
   // Add appropriate prefix
-  const prefix = isPreviewMode ? '/ycode/preview' : '';
+  const prefix = isPreviewMode ? '/webwow/preview' : '';
   return localizedPath ? `${prefix}/${localizedPath}` : (prefix || '/');
 }

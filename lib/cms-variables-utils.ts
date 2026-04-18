@@ -2,7 +2,7 @@
  * CMS Variables Utilities
  *
  * Utilities for parsing and converting CMS variable strings
- * Format: <ycode-inline-variable>{"type":"field","data":{"field_id":"..."}}</ycode-inline-variable>
+ * Format: <webwow-inline-variable>{"type":"field","data":{"field_id":"..."}}</webwow-inline-variable>
  */
 
 import type { CollectionField, InlineVariable } from '@/types';
@@ -141,8 +141,8 @@ export function getVariableLabel(
 /**
  * Converts string with variables to Tiptap JSON content
  * Supports both ID-based format and legacy embedded JSON format
- * ID-based: <ycode-inline-variable id="uuid"></ycode-inline-variable>
- * Legacy: <ycode-inline-variable>JSON</ycode-inline-variable>
+ * ID-based: <webwow-inline-variable id="uuid"></webwow-inline-variable>
+ * Legacy: <webwow-inline-variable>JSON</webwow-inline-variable>
  */
 export function parseValueToContent(
   text: string,
@@ -157,7 +157,7 @@ export function parseValueToContent(
   }>;
 } {
   const content: any[] = [];
-  const regex = /<ycode-inline-variable(?:\s+id="([^"]+)")?>([\s\S]*?)<\/ycode-inline-variable>/g;
+  const regex = /<webwow-inline-variable(?:\s+id="([^"]+)")?>([\s\S]*?)<\/webwow-inline-variable>/g;
   let lastIndex = 0;
   let match;
 
@@ -233,7 +233,7 @@ export function parseValueToContent(
 
 /**
  * Converts Tiptap JSON content back to string
- * Outputs format: <ycode-inline-variable>{"type":"field","data":{"field_id":"..."}}</ycode-inline-variable>
+ * Outputs format: <webwow-inline-variable>{"type":"field","data":{"field_id":"..."}}</webwow-inline-variable>
  */
 export function convertContentToValue(content: any): string {
   let result = '';
@@ -246,7 +246,7 @@ export function convertContentToValue(content: any): string {
             result += node.text;
           } else if (node.type === 'dynamicVariable') {
             if (node.attrs.variable) {
-              result += `<ycode-inline-variable>${JSON.stringify(node.attrs.variable)}</ycode-inline-variable>`;
+              result += `<webwow-inline-variable>${JSON.stringify(node.attrs.variable)}</webwow-inline-variable>`;
             }
           }
         }

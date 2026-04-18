@@ -2,7 +2,7 @@ import { getKnexClient, closeKnexClient, testKnexConnection } from '../knex-clie
 import { STORAGE_FOLDERS } from '@/lib/asset-constants';
 import { uploadFile, getPublicUrl } from '@/lib/local-storage';
 import { migrations } from '../migrations-loader';
-import { YCODE_EXTERNAL_API_URL } from '@/lib/config';
+import { WEBWOW_EXTERNAL_API_URL } from '@/lib/config';
 
 /**
  * Tables to truncate when applying a template.
@@ -63,7 +63,7 @@ export async function listTemplatesWithCategories(): Promise<{
   templates: Template[];
   categories: TemplateCategory[];
 }> {
-  const response = await fetch(`${YCODE_EXTERNAL_API_URL}/api/templates`, {
+  const response = await fetch(`${WEBWOW_EXTERNAL_API_URL}/api/templates`, {
     cache: 'no-store',
   });
 
@@ -100,7 +100,7 @@ export async function listCategories(): Promise<TemplateCategory[]> {
  * Get template details from the template service
  */
 export async function getTemplate(id: string): Promise<TemplateDetails | null> {
-  const response = await fetch(`${YCODE_EXTERNAL_API_URL}/api/templates/${id}`, {
+  const response = await fetch(`${WEBWOW_EXTERNAL_API_URL}/api/templates/${id}`, {
     cache: 'no-store',
   });
 
@@ -265,7 +265,7 @@ export async function applyTemplate(
   try {
     // 1. Fetch processed SQL from template service
     const response = await fetch(
-      `${YCODE_EXTERNAL_API_URL}/api/templates/${templateId}/apply`,
+      `${WEBWOW_EXTERNAL_API_URL}/api/templates/${templateId}/apply`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

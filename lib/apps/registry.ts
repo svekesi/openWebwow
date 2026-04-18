@@ -6,7 +6,7 @@
  * 1. Adding an AppDefinition here
  * 2. Creating the app module under lib/apps/<app-id>/
  * 3. Adding a logo.svg in lib/apps/<app-id>/logo.svg
- * 4. Creating proxy API routes under app/ycode/api/apps/<app-id>/
+ * 4. Creating proxy API routes under app/webwow/api/apps/<app-id>/
  */
 
 import type { StaticImageData } from 'next/image';

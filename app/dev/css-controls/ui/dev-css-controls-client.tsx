@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import EffectControls from '@/app/ycode/components/EffectControls';
-import SettingsPanel from '@/app/ycode/components/SettingsPanel';
-import SpacingControls from '@/app/ycode/components/SpacingControls';
-import TypographyControls from '@/app/ycode/components/TypographyControls';
+import EffectControls from '@/app/webwow/components/EffectControls';
+import SettingsPanel from '@/app/webwow/components/SettingsPanel';
+import SpacingControls from '@/app/webwow/components/SpacingControls';
+import TypographyControls from '@/app/webwow/components/TypographyControls';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { DesignProperties, Layer } from '@/types';
 
@@ -64,7 +64,7 @@ export default function DevCssControlsClient() {
   useEffect(() => {
     window.parent.postMessage(
       {
-        source: 'ycode-css-controls',
+        source: 'webwow-css-controls',
         type: 'design-change',
         declarations: cssDeclarations,
       },

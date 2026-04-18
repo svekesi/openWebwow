@@ -1,5 +1,5 @@
 name: Feature Request
-description: Suggest a new feature or improvement for Ycode
+description: Suggest a new feature or improvement for Webwow
 labels: ["enhancement"]
 body:
   - type: markdown
@@ -34,7 +34,7 @@ body:
     id: area
     attributes:
       label: Area
-      description: Which part of Ycode does this relate to?
+      description: Which part of Webwow does this relate to?
       options:
         - Visual Editor
         - Collections / CMS

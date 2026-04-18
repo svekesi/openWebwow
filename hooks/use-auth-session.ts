@@ -26,7 +26,7 @@ export function useAuthSession(): AuthSessionState {
   useEffect(() => {
     const checkSession = async () => {
       try {
-        const res = await fetch('/ycode/api/auth/session');
+        const res = await fetch('/webwow/api/auth/session');
         if (res.ok) {
           const data = await res.json();
           setSession(data);

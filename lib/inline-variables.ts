@@ -9,11 +9,11 @@ import type { CollectionItemWithValues } from '@/types';
 import { formatFieldValue, resolveFieldFromSources } from '@/lib/cms-variables-utils';
 
 /** Regex for matching inline variable tags (use with 'g' flag) */
-export const INLINE_VARIABLE_REGEX = /<ycode-inline-variable>([\s\S]*?)<\/ycode-inline-variable>/g;
+export const INLINE_VARIABLE_REGEX = /<webwow-inline-variable>([\s\S]*?)<\/webwow-inline-variable>/g;
 
 /**
  * Resolve inline variables in a text string
- * Replaces <ycode-inline-variable>{"type":"field","data":{"field_id":"...","field_type":"..."}}</ycode-inline-variable>
+ * Replaces <webwow-inline-variable>{"type":"field","data":{"field_id":"...","field_type":"..."}}</webwow-inline-variable>
  * with actual field values from the collection item
  *
  * CLIENT-SAFE: Pure string manipulation, works on both client and server

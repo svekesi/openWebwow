@@ -11,7 +11,7 @@ import { getKnexClient } from '@/lib/knex-client';
  */
 
 /** Cookie name for page authentication - exported for use in API routes */
-export const PAGE_AUTH_COOKIE_NAME = 'ycode_page_auth';
+export const PAGE_AUTH_COOKIE_NAME = 'webwow_page_auth';
 
 const fallbackSecret = randomUUID();
 let hasWarnedMissingSecret = false;

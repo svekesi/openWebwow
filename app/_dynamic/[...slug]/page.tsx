@@ -143,7 +143,7 @@ export default async function DynamicSlugPage({ params, searchParams }: DynamicS
       gaMeasurementId={globalSettings.gaMeasurementId}
       globalCustomCodeHead={globalSettings.globalCustomCodeHead}
       globalCustomCodeBody={globalSettings.globalCustomCodeBody}
-      ycodeBadge={globalSettings.ycodeBadge}
+      webwowBadge={globalSettings.webwowBadge}
     />
   );
 }

@@ -1,9 +1,9 @@
 /**
- * Check for Ycode updates from the official repository.
+ * Check for Webwow updates from the official repository.
  * Extracted for reuse and to allow cloud overlay to return "no update" in hosted deployments.
  */
 
-const UPSTREAM_REPO = 'ycode/ycode'; // Official Ycode repo
+const UPSTREAM_REPO = 'webwow/webwow'; // Official Webwow repo
 
 export interface CheckUpdatesResult {
   available: boolean;
@@ -41,7 +41,7 @@ function compareVersions(a: string, b: string): number {
 }
 
 /**
- * Check for updates from the official Ycode repository
+ * Check for updates from the official Webwow repository
  */
 export async function checkForUpdates(currentVersion: string): Promise<CheckUpdatesResult> {
   try {
@@ -50,7 +50,7 @@ export async function checkForUpdates(currentVersion: string): Promise<CheckUpda
       {
         headers: {
           'Accept': 'application/vnd.github.v3+json',
-          'User-Agent': 'Ycode-Update-Checker',
+          'User-Agent': 'Webwow-Update-Checker',
         },
         cache: 'no-store',
       }

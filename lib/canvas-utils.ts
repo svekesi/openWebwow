@@ -41,7 +41,7 @@ export function getCanvasIframeHtml(mountId: string = 'canvas-mount'): string {
       --color-destructive: oklch(0.704 0.191 22.216);
     }
   </style>
-  <style id="ycode-fonts-style">
+  <style id="webwow-fonts-style">
     /* Font CSS (Google @import + custom @font-face) injected dynamically */
   </style>
   <style>

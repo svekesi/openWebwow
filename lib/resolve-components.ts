@@ -47,16 +47,16 @@ function remapDesignColor(dcv: any, idMap: Map<string, string>): any {
  */
 function remapCollectionLayerIdsInContent(content: any, idMap: Map<string, string>): any {
   if (typeof content === 'string') {
-    // Remap in inline variable tags: <ycode-inline-variable>{"...collection_layer_id":"old"...}</ycode-inline-variable>
+    // Remap in inline variable tags: <webwow-inline-variable>{"...collection_layer_id":"old"...}</webwow-inline-variable>
     return content.replace(
-      /<ycode-inline-variable>([\s\S]*?)<\/ycode-inline-variable>/g,
+      /<webwow-inline-variable>([\s\S]*?)<\/webwow-inline-variable>/g,
       (match, inner) => {
         try {
           const parsed = JSON.parse(inner.trim());
           const clid = parsed?.data?.collection_layer_id;
           if (clid && idMap.has(clid)) {
             parsed.data.collection_layer_id = idMap.get(clid);
-            return `<ycode-inline-variable>${JSON.stringify(parsed)}</ycode-inline-variable>`;
+            return `<webwow-inline-variable>${JSON.stringify(parsed)}</webwow-inline-variable>`;
           }
         } catch { /* not valid JSON, leave as-is */ }
         return match;

@@ -2,7 +2,7 @@
  * Minimal Swiper CSS — only functional styles for slider mechanics.
  * We intentionally skip swiper/css core which sets layout properties
  * (overflow, width, height, position, display) that conflict with
- * builder Tailwind classes. Matches the legacy ycode approach.
+ * builder Tailwind classes. Matches the legacy webwow approach.
  */
 
 .swiper-button-lock { display: none !important; }

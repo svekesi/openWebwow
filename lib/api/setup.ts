@@ -13,7 +13,7 @@ export async function checkSetupStatus(): Promise<{
   is_configured: boolean;
   is_setup_complete?: boolean;
 }> {
-  const response = await fetch('/ycode/api/setup/status');
+  const response = await fetch('/webwow/api/setup/status');
 
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -28,7 +28,7 @@ export async function checkSetupStatus(): Promise<{
 export async function connectDatabase(
   databaseUrl: string
 ): Promise<ApiResponse<void>> {
-  const response = await fetch('/ycode/api/setup/connect', {
+  const response = await fetch('/webwow/api/setup/connect', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ database_url: databaseUrl }),
@@ -41,7 +41,7 @@ export async function connectDatabase(
  * Run database migrations (Knex) and seeds if configured
  */
 export async function runMigrations(): Promise<ApiResponse<void>> {
-  const response = await fetch('/ycode/api/setup/migrate', {
+  const response = await fetch('/webwow/api/setup/migrate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   });
@@ -55,7 +55,7 @@ export async function runMigrations(): Promise<ApiResponse<void>> {
 export async function completeSetup(): Promise<ApiResponse<{ redirect_url: string }>> {
   return {
     data: {
-      redirect_url: '/ycode',
+      redirect_url: '/webwow',
     },
   };
 }

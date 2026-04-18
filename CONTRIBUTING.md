@@ -1,6 +1,6 @@
-# Contributing to Ycode
+# Contributing to Webwow
 
-Thanks for your interest in contributing to Ycode! This guide will help you get started.
+Thanks for your interest in contributing to Webwow! This guide will help you get started.
 
 ## Development Setup
 
@@ -15,8 +15,8 @@ Thanks for your interest in contributing to Ycode! This guide will help you get 
 1. Fork and clone the repository:
 
    ```bash
-   git clone https://github.com/YOUR-USERNAME/ycode.git
-   cd ycode
+   git clone https://github.com/YOUR-USERNAME/webwow.git
+   cd webwow
    ```
 
 2. Install dependencies:
@@ -91,13 +91,13 @@ npm run migrate:make -- migration_name
 
 ## Reporting Bugs
 
-- Use [GitHub Issues](https://github.com/ycode/ycode/issues) to report bugs
+- Use [GitHub Issues](https://github.com/webwow/webwow/issues) to report bugs
 - Include steps to reproduce, expected behavior, and actual behavior
 - Include browser and OS information if relevant
 
 ## Requesting Features
 
-- Open a [Discussion](https://github.com/ycode/ycode/discussions) to propose new features
+- Open a [Discussion](https://github.com/webwow/webwow/discussions) to propose new features
 - Describe the use case and why it would be valuable
 
 ## Code Style
@@ -109,4 +109,4 @@ npm run migrate:make -- migration_name
 
 ## License
 
-By contributing to Ycode, you agree that your contributions will be licensed under the [MIT License](LICENSE).
+By contributing to Webwow, you agree that your contributions will be licensed under the [MIT License](LICENSE).

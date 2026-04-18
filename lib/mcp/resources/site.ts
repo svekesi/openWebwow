@@ -10,7 +10,7 @@ import { getAllLocales } from '@/lib/repositories/localeRepository';
 export function registerSiteResources(server: McpServer) {
   server.resource(
     'site-pages',
-    'ycode://site/pages',
+    'webwow://site/pages',
     {
       description: 'Current site structure — all pages with IDs, names, slugs, and folder hierarchy',
       mimeType: 'application/json',
@@ -23,7 +23,7 @@ export function registerSiteResources(server: McpServer) {
 
       return {
         contents: [{
-          uri: 'ycode://site/pages',
+          uri: 'webwow://site/pages',
           mimeType: 'application/json',
           text: JSON.stringify({
             pages: pages.map((p) => ({
@@ -47,7 +47,7 @@ export function registerSiteResources(server: McpServer) {
 
   server.resource(
     'site-collections',
-    'ycode://site/collections',
+    'webwow://site/collections',
     {
       description: 'Current CMS schema — all collections with their field definitions',
       mimeType: 'application/json',
@@ -75,7 +75,7 @@ export function registerSiteResources(server: McpServer) {
 
       return {
         contents: [{
-          uri: 'ycode://site/collections',
+          uri: 'webwow://site/collections',
           mimeType: 'application/json',
           text: JSON.stringify(schema, null, 2),
         }],
@@ -85,7 +85,7 @@ export function registerSiteResources(server: McpServer) {
 
   server.resource(
     'site-design-tokens',
-    'ycode://site/design-tokens',
+    'webwow://site/design-tokens',
     {
       description: 'Current design tokens — color variables, fonts, and locales configured for the site',
       mimeType: 'application/json',
@@ -99,7 +99,7 @@ export function registerSiteResources(server: McpServer) {
 
       return {
         contents: [{
-          uri: 'ycode://site/design-tokens',
+          uri: 'webwow://site/design-tokens',
           mimeType: 'application/json',
           text: JSON.stringify({
             color_variables: colorVariables.map((v) => ({

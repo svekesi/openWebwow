@@ -10,7 +10,7 @@ function getAvailableTemplates() {
 }
 
 const EXAMPLE_PROMPTS = {
-  description: 'Example prompts and tool usage patterns for common YCode tasks',
+  description: 'Example prompts and tool usage patterns for common Webwow tasks',
   quick_start: {
     title: 'Build a complete landing page',
     prompt: 'Create a modern landing page with a hero section, 3 feature cards, testimonials, and a footer.',
@@ -50,14 +50,14 @@ const EXAMPLE_PROMPTS = {
 export function registerReferenceResources(server: McpServer) {
   server.resource(
     'elements-reference',
-    'ycode://reference/elements',
+    'webwow://reference/elements',
     {
       description: 'Available element types, nesting rules, and which elements can have children',
       mimeType: 'application/json',
     },
     async () => ({
       contents: [{
-        uri: 'ycode://reference/elements',
+        uri: 'webwow://reference/elements',
         mimeType: 'application/json',
         text: JSON.stringify({
           templates: getAvailableTemplates(),
@@ -120,14 +120,14 @@ export function registerReferenceResources(server: McpServer) {
 
   server.resource(
     'design-reference',
-    'ycode://reference/design-properties',
+    'webwow://reference/design-properties',
     {
       description: 'Complete reference of all design property categories and allowed values',
       mimeType: 'application/json',
     },
     async () => ({
       contents: [{
-        uri: 'ycode://reference/design-properties',
+        uri: 'webwow://reference/design-properties',
         mimeType: 'application/json',
         text: JSON.stringify({
           instructions: 'Set isActive: true on any category for it to take effect. Use ui_state parameter for hover/focus/active styles. Use bgGradientVars for gradient backgrounds.',
@@ -185,14 +185,14 @@ export function registerReferenceResources(server: McpServer) {
 
   server.resource(
     'prompts-reference',
-    'ycode://reference/prompts',
+    'webwow://reference/prompts',
     {
       description: 'Example prompts and workflows for common website-building tasks',
       mimeType: 'application/json',
     },
     async () => ({
       contents: [{
-        uri: 'ycode://reference/prompts',
+        uri: 'webwow://reference/prompts',
         mimeType: 'application/json',
         text: JSON.stringify(EXAMPLE_PROMPTS, null, 2),
       }],

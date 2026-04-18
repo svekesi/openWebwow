@@ -2,7 +2,7 @@
  * Server-Side CSS Generator using Tailwind CSS Node API
  *
  * Mirrors the client-side cssGenerator but runs on the server.
- * Used by the /ycode/api/css/generate endpoint so that MCP-created
+ * Used by the /webwow/api/css/generate endpoint so that MCP-created
  * layers (or any API-driven changes) get their CSS generated without
  * needing the browser editor open.
  */

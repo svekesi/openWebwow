@@ -452,7 +452,7 @@ export default function FilterableCollection({
     abortRef.current = controller;
     inFlightRequestKeyRef.current = requestKey;
 
-    fetch(`/ycode/api/collections/${collectionId}/items/filter`, {
+    fetch(`/webwow/api/collections/${collectionId}/items/filter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

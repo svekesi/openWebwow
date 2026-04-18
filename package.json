@@ -1,14 +1,14 @@
 {
-  "name": "ycode",
+  "name": "webwow",
   "version": "0.9.0",
   "description": "Visual website builder you can self-host",
   "license": "MIT",
   "private": false,
-  "author": "Ycode",
-  "homepage": "https://www.ycode.com",
+  "author": "svekesi",
+  "homepage": "https://github.com/svekesi/openWebwow",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ycode/ycode.git"
+    "url": "https://github.com/svekesi/openWebwow.git"
   },
   "keywords": [
     "website-builder",

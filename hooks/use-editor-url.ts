@@ -66,20 +66,20 @@ export function useEditorUrl() {
   // Parse current URL to determine state
   const urlState = useMemo((): EditorUrlState => {
     // Match new patterns:
-    // - /ycode/layers/[id] → layer editing
-    // - /ycode/pages/[id] → page view (with optional ?edit query param for settings)
-    // - /ycode/collections → base collections view (no ID)
-    // - /ycode/collections/[id] → specific collection view (with optional ?new or ?edit=itemId query params)
-    // - /ycode/components/[id] → component editing
+    // - /webwow/layers/[id] → layer editing
+    // - /webwow/pages/[id] → page view (with optional ?edit query param for settings)
+    // - /webwow/collections → base collections view (no ID)
+    // - /webwow/collections/[id] → specific collection view (with optional ?new or ?edit=itemId query params)
+    // - /webwow/components/[id] → component editing
 
-    const layersMatch = pathname?.match(/^\/ycode\/layers\/([^/]+)$/);
-    const pageMatch = pathname?.match(/^\/ycode\/pages\/([^/]+)$/);
-    const collectionsBaseMatch = pathname?.match(/^\/ycode\/collections$/);
-    const collectionMatch = pathname?.match(/^\/ycode\/collections\/([^/]+)$/);
-    const componentMatch = pathname?.match(/^\/ycode\/components\/([^/]+)$/);
-    const settingsMatch = pathname?.match(/^\/ycode\/settings(?:\/([^/]+))?$/);
-    const localizationMatch = pathname?.match(/^\/ycode\/localization(?:\/([^/]+))?$/);
-    const profileMatch = pathname?.match(/^\/ycode\/profile(?:\/([^/]+))?$/);
+    const layersMatch = pathname?.match(/^\/webwow\/layers\/([^/]+)$/);
+    const pageMatch = pathname?.match(/^\/webwow\/pages\/([^/]+)$/);
+    const collectionsBaseMatch = pathname?.match(/^\/webwow\/collections$/);
+    const collectionMatch = pathname?.match(/^\/webwow\/collections\/([^/]+)$/);
+    const componentMatch = pathname?.match(/^\/webwow\/components\/([^/]+)$/);
+    const settingsMatch = pathname?.match(/^\/webwow\/settings(?:\/([^/]+))?$/);
+    const localizationMatch = pathname?.match(/^\/webwow\/localization(?:\/([^/]+))?$/);
+    const profileMatch = pathname?.match(/^\/webwow\/profile(?:\/([^/]+))?$/);
 
     if (layersMatch) {
       const viewParam = searchParams?.get('view');
@@ -182,7 +182,7 @@ export function useEditorUrl() {
     }
 
     // Forms route matching
-    const formsMatch = pathname?.match(/^\/ycode\/forms(?:\/([^/]+))?$/);
+    const formsMatch = pathname?.match(/^\/webwow\/forms(?:\/([^/]+))?$/);
     if (formsMatch) {
       return {
         type: 'forms',
@@ -194,7 +194,7 @@ export function useEditorUrl() {
     }
 
     // Integrations route matching
-    const integrationsMatch = pathname?.match(/^\/ycode\/integrations(?:\/([^/]+))?$/);
+    const integrationsMatch = pathname?.match(/^\/webwow\/integrations(?:\/([^/]+))?$/);
     if (integrationsMatch) {
       return {
         type: 'integrations',
@@ -220,7 +220,7 @@ export function useEditorUrl() {
       };
     }
 
-    // For /ycode base route
+    // For /webwow base route
     return {
       type: null,
       resourceId: null,
@@ -245,7 +245,7 @@ export function useEditorUrl() {
       currentParams.set('layer', layerId || currentParams.get('layer') || 'body');
 
       const query = currentParams.toString();
-      router.push(`/ycode/layers/${pageId}?${query}`);
+      router.push(`/webwow/layers/${pageId}?${query}`);
     },
     [router]
   );
@@ -264,7 +264,7 @@ export function useEditorUrl() {
       currentParams.set('layer', layerId || currentParams.get('layer') || 'body');
 
       const query = currentParams.toString();
-      router.push(`/ycode/pages/${pageId}?${query}`);
+      router.push(`/webwow/pages/${pageId}?${query}`);
     },
     [router]
   );
@@ -292,7 +292,7 @@ export function useEditorUrl() {
       }
 
       const query = currentParams.toString();
-      router.push(`/ycode/pages/${pageId}${query ? `?${query}` : ''}`);
+      router.push(`/webwow/pages/${pageId}${query ? `?${query}` : ''}`);
     },
     [router, searchParams]
   );
@@ -319,25 +319,25 @@ export function useEditorUrl() {
         params.set('limit', pageSize.toString());
       }
       const query = params.toString();
-      router.push(`/ycode/collections/${collectionId}${query ? `?${query}` : ''}`);
+      router.push(`/webwow/collections/${collectionId}${query ? `?${query}` : ''}`);
     },
     [router]
   );
 
   const navigateToCollections = useCallback(() => {
-    router.push('/ycode/collections');
+    router.push('/webwow/collections');
   }, [router]);
 
   const navigateToCollectionItem = useCallback(
     (collectionId: string, itemRId: string) => {
-      router.push(`/ycode/collections/${collectionId}?edit=${itemRId}`);
+      router.push(`/webwow/collections/${collectionId}?edit=${itemRId}`);
     },
     [router]
   );
 
   const navigateToNewCollectionItem = useCallback(
     (collectionId: string) => {
-      router.push(`/ycode/collections/${collectionId}?new`);
+      router.push(`/webwow/collections/${collectionId}?new`);
     },
     [router]
   );
@@ -354,13 +354,13 @@ export function useEditorUrl() {
       if (layerId) params.set('layer', layerId);
 
       const query = params.toString();
-      router.push(`/ycode/components/${componentId}${query ? `?${query}` : ''}`);
+      router.push(`/webwow/components/${componentId}${query ? `?${query}` : ''}`);
     },
     [router]
   );
 
   const navigateToEditor = useCallback(() => {
-    router.push('/ycode');
+    router.push('/webwow');
   }, [router]);
 
   const updateQueryParams = useCallback(
