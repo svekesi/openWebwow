@@ -40,6 +40,13 @@ import { checkCircularReference } from '@/lib/component-utils';
 // Right sidebar is always visible in editor mode - load eagerly to avoid delay
 import RightSidebar from '../components/RightSidebar';
 
+// Module-level flag: once the builder UI was rendered for the first time,
+// never show the full-screen "Loading builder data..." overlay again.
+// Prevents the loader-flash on every navigation/click when the editor store
+// gets transiently re-initialised. The first paint still uses the loader to
+// avoid race conditions on cold start.
+let __builderHasRenderedOnce = false;
+
 // Lazy-loaded components (heavy, not needed on initial render)
 const CMS = lazy(() => import('../components/CMS'));
 const CollectionItemSheet = lazy(() => import('../components/CollectionItemSheet'));
@@ -1864,10 +1871,13 @@ export default function WebwowBuilder({ children }: WebwowBuilderProps = {} as W
     return <MigrationChecker onComplete={() => setMigrationsComplete(true)} />;
   }
 
-  // Wait for builder data to be preloaded (BLOCKING) - prevents race conditions
-  if (!builderDataPreloaded) {
+  // Wait for builder data to be preloaded - only on the very first render.
+  // Subsequent transient false-states never re-show the full-screen loader,
+  // which avoids the "Loading builder data..." flash on every click.
+  if (!builderDataPreloaded && !__builderHasRenderedOnce) {
     return <BuilderLoading message="Loading builder data..." />;
   }
+  __builderHasRenderedOnce = true;
 
   // Authenticated - show builder (only after migrations AND data preload complete)
   return (
