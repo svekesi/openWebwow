@@ -23,6 +23,7 @@
         "name": "next"
       }
     ],
+    "baseUrl": ".",
     "paths": {
       "@/*": [
         "./*"
@@ -37,9 +38,12 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "tools",
+    "import"
   ],
   "ts-node": {
+    "transpileOnly": true,
     "require": ["tsconfig-paths/register"],
     "compilerOptions": {
       "module": "commonjs",
