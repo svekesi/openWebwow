@@ -77,7 +77,7 @@ Team, Testimonials, FAQ, Navigation, Footer`,
 
   server.tool(
     'add_layout',
-    `Insert a pre-built layout section into a page from YCode's template library.
+    `Insert a pre-built layout section into a page from Webwow's template library.
 Use list_layouts to see available layouts.`,
     {
       page_id: z.string().describe('The page ID'),

@@ -26,7 +26,7 @@ export function registerAssetTools(server: McpServer) {
 
   server.tool(
     'upload_asset',
-    `Upload an image to YCode's asset library. Accepts either a public URL or base64-encoded image data.
+    `Upload an image to Webwow's asset library. Accepts either a public URL or base64-encoded image data.
 
 Use url for images already on the internet.
 Use base64_data for images generated locally (e.g. AI-generated images in a sandbox).`,

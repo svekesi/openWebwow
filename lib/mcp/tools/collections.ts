@@ -8,7 +8,7 @@ import { setValuesByFieldName } from '@/lib/repositories/collectionItemValueRepo
 export function registerCollectionTools(server: McpServer) {
   server.tool(
     'list_collections',
-    "List all CMS collections with their IDs, names, and slugs. Collections are YCode's CMS — each collection is like a database table.",
+    "List all CMS collections with their IDs, names, and slugs. Collections are Webwow's CMS — each collection is like a database table.",
     {},
     async () => {
       const collections = await getAllCollections();
