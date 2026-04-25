@@ -6,6 +6,10 @@ const nextConfig: NextConfig = {
   experimental: {
     // Needed for large Webflow ZIP imports when proxy.ts is active.
     proxyClientMaxBodySize: '300mb',
+    // Route handlers share the same body size limit as Server Actions.
+    serverActions: {
+      bodySizeLimit: '100mb',
+    },
   },
 
   serverExternalPackages: [
