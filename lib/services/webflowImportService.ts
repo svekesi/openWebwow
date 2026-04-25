@@ -11,11 +11,13 @@ import { createAsset } from '@/lib/repositories/assetRepository';
 import { uploadFile as uploadToStorage, getPublicUrl } from '@/lib/local-storage';
 import { getDefaultSitemapSettings } from '@/lib/sitemap-utils';
 import { stringToTiptapContent } from '@/lib/text-format-utils';
+import { classesToDesign, designToClasses } from '@/lib/tailwind-class-mapper';
 import {
   importProject,
   type ProjectExportData,
   type ProjectManifest,
 } from '@/lib/services/projectService';
+import { detectWebflowComponent } from '@/lib/services/webflow-component-detector';
 import type {
   CollectionFieldType,
   Layer,
@@ -74,6 +76,9 @@ interface BuiltPageEntry {
 interface LayerStyleBuildResult {
   layerStyleRows: Record<string, unknown>[];
   styleIdByClassSignature: Map<string, string>;
+  styleClassesByClassSignature: Map<string, string>;
+  styleDesignByClassSignature: Map<string, Layer['design']>;
+  classTokenToTailwindMap: Map<string, string>;
 }
 
 const CSV_META_COLUMNS = new Set([
@@ -222,8 +227,16 @@ function splitReferenceCandidates(value: string): string[] {
 }
 
 function slugFromFilename(filename: string): string {
-  const base = path.basename(filename, '.html').toLowerCase();
+  let base = path.basename(filename, '.html').toLowerCase();
   if (base === 'index') return '';
+
+  // Webflow uses `detail_<collection-slug>.html` (or `detail-...`) as the
+  // CMS template filename. The actual public URL on the live site is
+  // `/<collection-slug>/<item-slug>` — the `detail` prefix never appears in
+  // the URL. Strip it here so our routing matches Webflow's behaviour
+  // instead of producing nonsense URLs like `/detail-werke/abends-piacenza`.
+  base = base.replace(/^detail[_-]+/, '');
+
   return base.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
@@ -461,19 +474,261 @@ function getLayerClasses(layer: Layer): string {
   return layer.classes || '';
 }
 
+/**
+ * Split a Tailwind/Webflow class string into tokens while preserving
+ * whitespace inside `[...]` arbitrary values. A naive `split(/\s+/)` would
+ * shred `text-[clamp(1rem, 3rem)]` into broken fragments.
+ */
+function splitClassesPreservingBrackets(value: string): string[] {
+  const tokens: string[] = [];
+  let current = '';
+  let bracketDepth = 0;
+  let parenDepth = 0;
+  for (const char of value) {
+    if (char === '[') bracketDepth++;
+    else if (char === ']') bracketDepth = Math.max(0, bracketDepth - 1);
+    else if (char === '(') parenDepth++;
+    else if (char === ')') parenDepth = Math.max(0, parenDepth - 1);
+    if (/\s/.test(char) && bracketDepth === 0 && parenDepth === 0) {
+      if (current) {
+        tokens.push(current);
+        current = '';
+      }
+      continue;
+    }
+    current += char;
+  }
+  if (current) tokens.push(current);
+  return tokens;
+}
+
 function normalizeClassSignature(value: string): string {
-  return value
-    .split(/\s+/)
+  return splitClassesPreservingBrackets(value)
     .map(part => part.trim())
     .filter(Boolean)
     .join(' ');
+}
+
+function mergeDesignObjects(
+  base: Layer['design'] | undefined,
+  extra: Layer['design'] | undefined
+): Layer['design'] {
+  if (!base && !extra) return undefined;
+  return {
+    layout: { ...(base?.layout || {}), ...(extra?.layout || {}) },
+    typography: { ...(base?.typography || {}), ...(extra?.typography || {}) },
+    spacing: { ...(base?.spacing || {}), ...(extra?.spacing || {}) },
+    sizing: { ...(base?.sizing || {}), ...(extra?.sizing || {}) },
+    borders: { ...(base?.borders || {}), ...(extra?.borders || {}) },
+    backgrounds: { ...(base?.backgrounds || {}), ...(extra?.backgrounds || {}) },
+    effects: { ...(base?.effects || {}), ...(extra?.effects || {}) },
+    positioning: { ...(base?.positioning || {}), ...(extra?.positioning || {}) },
+  };
+}
+
+/**
+ * Intentionally empty: we no longer ship a static Webflow→Tailwind map.
+ *
+ * We used to inject e.g. `flex` for every `.w-nav-menu` and `grid` for every
+ * `.w-layout-grid`, but those unconditional utilities overrode Webflow's own
+ * responsive CSS (e.g. `@media(max-width:991px) .w-nav-menu { display:none }`)
+ * and shattered the layout. The imported webflow.css already carries every
+ * one of these rules including @media variants — adding parallel Tailwind
+ * utilities is at best redundant and at worst destructive.
+ *
+ * Specific element conversions are now handled by the central component
+ * detector (see `webflow-component-detector.ts`).
+ */
+const WEBFLOW_CLASS_TOKEN_TO_TAILWIND_ENTRIES: Array<[string, string]> = [];
+
+function collectCssDeclarationsByClassToken(
+  cssFiles: Array<{ filePath: string; content: string }>
+): Map<string, Record<string, string>> {
+  const declarationsByClass = new Map<string, Record<string, string>>();
+
+  for (const cssFile of cssFiles) {
+    const ruleRegex = /([^{}]+)\{([^{}]+)\}/g;
+    for (const match of cssFile.content.matchAll(ruleRegex)) {
+      const selectorText = (match[1] || '').trim();
+      const body = (match[2] || '').trim();
+      if (!selectorText || !body || selectorText.startsWith('@')) continue;
+
+      const declarations: Record<string, string> = {};
+      for (const decl of body.split(';')) {
+        const idx = decl.indexOf(':');
+        if (idx <= 0) continue;
+        const key = decl.slice(0, idx).trim().toLowerCase();
+        const value = sanitizeCssValue(decl.slice(idx + 1));
+        if (!key || !value) continue;
+        declarations[key] = value;
+      }
+      if (Object.keys(declarations).length === 0) continue;
+
+      for (const selector of selectorText.split(',')) {
+        const classMatches = [...selector.matchAll(/\.(-?[_a-zA-Z]+[_a-zA-Z0-9-]*)/g)];
+        for (const classMatch of classMatches) {
+          const classToken = (classMatch[1] || '').trim();
+          if (!classToken) continue;
+          const existing = declarationsByClass.get(classToken) || {};
+          declarationsByClass.set(classToken, { ...existing, ...declarations });
+        }
+      }
+    }
+  }
+
+  return declarationsByClass;
+}
+
+function declarationsToDesign(decls?: Record<string, string>): Layer['design'] | undefined {
+  if (!decls) return undefined;
+  let design: Layer['design'] | undefined;
+  const set = (patch: Layer['design']) => {
+    design = mergeDesignObjects(design, patch);
+  };
+
+  const display = decls['display'];
+  if (display) set({ layout: { display, isActive: true } });
+  if (decls['flex-direction']) set({ layout: { flexDirection: decls['flex-direction'], isActive: true } });
+  if (decls['justify-content']) set({ layout: { justifyContent: decls['justify-content'], isActive: true } });
+  if (decls['align-items']) set({ layout: { alignItems: decls['align-items'], isActive: true } });
+  if (decls['grid-template-columns']) set({ layout: { gridTemplateColumns: decls['grid-template-columns'], isActive: true } });
+  if (decls['grid-template-rows']) set({ layout: { gridTemplateRows: decls['grid-template-rows'], isActive: true } });
+  if (decls['gap']) set({ layout: { gap: decls['gap'], isActive: true } });
+  if (decls['column-gap']) set({ layout: { columnGap: decls['column-gap'], isActive: true } });
+  if (decls['row-gap']) set({ layout: { rowGap: decls['row-gap'], isActive: true } });
+
+  if (decls['width']) set({ sizing: { width: decls['width'], isActive: true } });
+  if (decls['height']) set({ sizing: { height: decls['height'], isActive: true } });
+  if (decls['min-width']) set({ sizing: { minWidth: decls['min-width'], isActive: true } });
+  if (decls['min-height']) set({ sizing: { minHeight: decls['min-height'], isActive: true } });
+  if (decls['max-width']) set({ sizing: { maxWidth: decls['max-width'], isActive: true } });
+  if (decls['max-height']) set({ sizing: { maxHeight: decls['max-height'], isActive: true } });
+
+  if (decls['padding']) set({ spacing: { padding: decls['padding'], isActive: true } });
+  if (decls['padding-top']) set({ spacing: { paddingTop: decls['padding-top'], isActive: true } });
+  if (decls['padding-right']) set({ spacing: { paddingRight: decls['padding-right'], isActive: true } });
+  if (decls['padding-bottom']) set({ spacing: { paddingBottom: decls['padding-bottom'], isActive: true } });
+  if (decls['padding-left']) set({ spacing: { paddingLeft: decls['padding-left'], isActive: true } });
+  if (decls['margin']) set({ spacing: { margin: decls['margin'], isActive: true } });
+  if (decls['margin-top']) set({ spacing: { marginTop: decls['margin-top'], isActive: true } });
+  if (decls['margin-right']) set({ spacing: { marginRight: decls['margin-right'], isActive: true } });
+  if (decls['margin-bottom']) set({ spacing: { marginBottom: decls['margin-bottom'], isActive: true } });
+  if (decls['margin-left']) set({ spacing: { marginLeft: decls['margin-left'], isActive: true } });
+
+  if (decls['color']) set({ typography: { color: decls['color'], isActive: true } });
+  if (decls['font-size']) set({ typography: { fontSize: decls['font-size'], isActive: true } });
+  if (decls['font-weight']) set({ typography: { fontWeight: decls['font-weight'], isActive: true } });
+  if (decls['line-height']) set({ typography: { lineHeight: decls['line-height'], isActive: true } });
+  if (decls['letter-spacing']) set({ typography: { letterSpacing: decls['letter-spacing'], isActive: true } });
+
+  // Typography extras (added in #22): text-decoration, text-transform, text-align
+  if (decls['text-decoration'] || decls['text-decoration-line']) {
+    set({ typography: { textDecoration: decls['text-decoration'] || decls['text-decoration-line'] || '', isActive: true } });
+  }
+  if (decls['text-transform']) set({ typography: { textTransform: decls['text-transform'], isActive: true } });
+  if (decls['text-align']) set({ typography: { textAlign: decls['text-align'], isActive: true } });
+  if (decls['font-family']) set({ typography: { fontFamily: decls['font-family'].replace(/['"]/g, ''), isActive: true } });
+
+  if (decls['background-color']) set({ backgrounds: { backgroundColor: decls['background-color'], isActive: true } });
+  if (decls['background-image']) set({ backgrounds: { backgroundImage: decls['background-image'], isActive: true } });
+  if (decls['background-size']) set({ backgrounds: { backgroundSize: decls['background-size'], isActive: true } });
+  if (decls['background-position']) set({ backgrounds: { backgroundPosition: decls['background-position'], isActive: true } });
+  if (decls['background-repeat']) set({ backgrounds: { backgroundRepeat: decls['background-repeat'], isActive: true } });
+
+  if (decls['border-radius']) set({ borders: { borderRadius: decls['border-radius'], isActive: true } });
+  if (decls['border-width']) set({ borders: { borderWidth: decls['border-width'], isActive: true } });
+  if (decls['border-style']) set({ borders: { borderStyle: decls['border-style'], isActive: true } });
+  if (decls['border-color']) set({ borders: { borderColor: decls['border-color'], isActive: true } });
+  // Per-side border-radius
+  if (decls['border-top-left-radius']) set({ borders: { borderTopLeftRadius: decls['border-top-left-radius'], isActive: true } });
+  if (decls['border-top-right-radius']) set({ borders: { borderTopRightRadius: decls['border-top-right-radius'], isActive: true } });
+  if (decls['border-bottom-left-radius']) set({ borders: { borderBottomLeftRadius: decls['border-bottom-left-radius'], isActive: true } });
+  if (decls['border-bottom-right-radius']) set({ borders: { borderBottomRightRadius: decls['border-bottom-right-radius'], isActive: true } });
+
+  // Effects: only properties Webwow's design panel exposes natively. The
+  // raw CSS values for transform/filter/transition/overflow/cursor are
+  // already preserved via the imported webflow.css that we ship with the
+  // import, so visually they still apply to the layer through its original
+  // class selector — we just don't surface them in the design panel.
+  if (decls['opacity']) set({ effects: { opacity: decls['opacity'], isActive: true } });
+  if (decls['box-shadow'] && decls['box-shadow'] !== 'none') {
+    set({ effects: { boxShadow: decls['box-shadow'], isActive: true } });
+  }
+
+  if (decls['object-fit']) set({ sizing: { objectFit: decls['object-fit'], isActive: true } });
+  if (decls['aspect-ratio']) set({ sizing: { aspectRatio: decls['aspect-ratio'], isActive: true } });
+
+  if (decls['position']) set({ positioning: { position: decls['position'], isActive: true } });
+  if (decls['top']) set({ positioning: { top: decls['top'], isActive: true } });
+  if (decls['right']) set({ positioning: { right: decls['right'], isActive: true } });
+  if (decls['bottom']) set({ positioning: { bottom: decls['bottom'], isActive: true } });
+  if (decls['left']) set({ positioning: { left: decls['left'], isActive: true } });
+  if (decls['z-index']) set({ positioning: { zIndex: decls['z-index'], isActive: true } });
+
+  return design;
+}
+
+function translateClassSignatureWithCss(
+  classSignature: string,
+  classTokenToTailwindMap: Map<string, string>,
+  cssDeclarationsByClassToken: Map<string, Record<string, string>>
+): { classes: string; design?: Layer['design'] } {
+  const translatedTokens: string[] = [];
+  let accumulatedDesign: Layer['design'] | undefined;
+  const sourceTokens = splitClassesPreservingBrackets(classSignature)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  for (const token of sourceTokens) {
+    // Always preserve the original Webflow class — the imported webflow.css
+    // contains rules like `.w-nav-menu { display:none }`, `.w-layout-grid {
+    // display:grid }`, `.w-container { max-width:940px; margin:0 auto }` etc.
+    // Stripping the original token would orphan those CSS selectors and break
+    // layout (collapsed containers, always-open nav menu, broken grids).
+    translatedTokens.push(token);
+
+    const mapped = classTokenToTailwindMap.get(token);
+    if (mapped) {
+      for (const mappedToken of mapped.split(/\s+/).map((part) => part.trim()).filter(Boolean)) {
+        translatedTokens.push(mappedToken);
+      }
+      continue;
+    }
+
+    const cssDecls = cssDeclarationsByClassToken.get(token);
+    const cssDesign = declarationsToDesign(cssDecls);
+    if (cssDesign) {
+      // Populate the design panel from the CSS rule so it reflects the
+      // imported values, but DO NOT emit equivalent Tailwind utility classes:
+      // the original Webflow class already carries those rules (including
+      // responsive @media variants). Adding Tailwind utilities here would
+      // override the responsive Webflow rules (e.g. a stable `flex` would
+      // beat `@media (max-width:991px) .w-nav-menu { display:none }`).
+      accumulatedDesign = mergeDesignObjects(accumulatedDesign, cssDesign);
+    }
+  }
+
+  return {
+    classes: normalizeClassSignature([...new Set(translatedTokens)].join(' ')),
+    design: accumulatedDesign,
+  };
+}
+
+function inferCustomName(tag: string, classes: string): string | undefined {
+  const classSet = new Set(splitClassesPreservingBrackets(classes).map((c) => c.trim()).filter(Boolean));
+  if (classSet.has('w-layout-grid')) return 'Grid';
+  if (tag === 'nav' || classSet.has('w-nav') || classSet.has('w-nav-menu')) return 'Navigation';
+  if (classSet.has('w-dropdown')) return 'Dropdown';
+  if (classSet.has('w-form')) return 'Form';
+  if (classSet.has('w-dyn-list')) return 'Collection List';
+  return undefined;
 }
 
 function collectLayerClassNames(layers: Layer[]): Set<string> {
   const classNames = new Set<string>();
 
   const visit = (layer: Layer) => {
-    for (const className of getLayerClasses(layer).split(/\s+/).filter(Boolean)) {
+    for (const className of splitClassesPreservingBrackets(getLayerClasses(layer)).filter(Boolean)) {
       classNames.add(className);
     }
     for (const child of layer.children || []) {
@@ -490,15 +745,35 @@ function collectLayerClassNames(layers: Layer[]): Set<string> {
 
 function applyLayerStylesToTree(
   layers: Layer[],
-  styleIdByClassSignature: Map<string, string>
+  styleIdByClassSignature: Map<string, string>,
+  styleClassesByClassSignature: Map<string, string>,
+  styleDesignByClassSignature: Map<string, Layer['design']>,
+  classTokenToTailwindMap: Map<string, string>
 ): Layer[] {
+  const inferCustomNameFromDesign = (design?: Layer['design']): string | undefined => {
+    const display = design?.layout?.display?.toLowerCase();
+    if (display === 'grid') return 'Grid';
+    return undefined;
+  };
+
   const visit = (layer: Layer): Layer => {
     const classSignature = normalizeClassSignature(getLayerClasses(layer));
     const matchedStyleId = classSignature ? styleIdByClassSignature.get(classSignature) : undefined;
+    const matchedClasses = classSignature ? styleClassesByClassSignature.get(classSignature) : undefined;
+    const matchedDesign = classSignature ? styleDesignByClassSignature.get(classSignature) : undefined;
+
+    const translatedUnmatchedClasses = classSignature
+      ? translateClassSignatureWithCss(classSignature, classTokenToTailwindMap, new Map()).classes
+      : '';
 
     const updated: Layer = {
       ...layer,
       ...(matchedStyleId ? { styleId: matchedStyleId } : {}),
+      classes: matchedClasses || translatedUnmatchedClasses || getLayerClasses(layer),
+      ...(matchedDesign ? { design: matchedDesign } : {}),
+      ...(layer.customName
+        ? {}
+        : (inferCustomNameFromDesign(matchedDesign) ? { customName: inferCustomNameFromDesign(matchedDesign) } : {})),
     };
 
     if (layer.children?.length) {
@@ -512,13 +787,13 @@ function applyLayerStylesToTree(
 }
 
 function buildLayerStyles(
-  cssFiles: Array<{ filePath: string; content: string }>,
+  cssSources: Array<{ filePath: string; content: string }>,
   pageLayerRows: Array<{ layers: Layer[] }>
 ): LayerStyleBuildResult {
   const classNames = new Set<string>();
   const classSignatures = new Set<string>();
 
-  for (const cssFile of cssFiles) {
+  for (const cssFile of cssSources) {
     for (const className of extractCssClassNames(cssFile.content)) {
       classNames.add(className);
     }
@@ -548,26 +823,46 @@ function buildLayerStyles(
   }
 
   const styleIdByClassSignature = new Map<string, string>();
+  const styleClassesByClassSignature = new Map<string, string>();
+  const styleDesignByClassSignature = new Map<string, Layer['design']>();
+  const classTokenToTailwindMap = new Map<string, string>(WEBFLOW_CLASS_TOKEN_TO_TAILWIND_ENTRIES);
+  const cssDeclarationsByClassToken = collectCssDeclarationsByClassToken(cssSources);
   const layerStyleRows: Record<string, unknown>[] = [];
 
   for (const classSignature of [...classSignatures].sort((a, b) => a.localeCompare(b))) {
     const styleId = randomUUID();
+    const translated = translateClassSignatureWithCss(
+      classSignature,
+      classTokenToTailwindMap,
+      cssDeclarationsByClassToken
+    );
+    const translatedClasses = translated.classes;
+    const styleDesign = mergeDesignObjects(classesToDesign(translatedClasses), translated.design);
     styleIdByClassSignature.set(classSignature, styleId);
+    styleClassesByClassSignature.set(classSignature, translatedClasses);
+    styleDesignByClassSignature.set(classSignature, styleDesign);
     layerStyleRows.push({
       id: styleId,
       name: classSignature,
-      classes: classSignature,
-      design: null,
+      classes: translatedClasses,
+      design: styleDesign,
       is_published: false,
     });
   }
 
   for (const className of [...classNames].sort((a, b) => a.localeCompare(b))) {
+    const translated = translateClassSignatureWithCss(
+      className,
+      classTokenToTailwindMap,
+      cssDeclarationsByClassToken
+    );
+    const translatedClasses = translated.classes;
+    const styleDesign = mergeDesignObjects(classesToDesign(translatedClasses), translated.design);
     layerStyleRows.push({
       id: randomUUID(),
       name: className,
-      classes: className,
-      design: null,
+      classes: translatedClasses,
+      design: styleDesign,
       is_published: false,
     });
   }
@@ -575,19 +870,22 @@ function buildLayerStyles(
   return {
     layerStyleRows,
     styleIdByClassSignature,
+    styleClassesByClassSignature,
+    styleDesignByClassSignature,
+    classTokenToTailwindMap,
   };
 }
 
 function dedupeLayerStyles(rows: Record<string, unknown>[]): Record<string, unknown>[] {
-  const seen = new Set<string>();
+  const seenNames = new Set<string>();
   const deduped: Record<string, unknown>[] = [];
 
   for (const row of rows) {
-    const classes = String(row.classes || '');
-    if (!classes || seen.has(classes)) {
+    const name = String(row.name || '').trim();
+    if (!name || seenNames.has(name)) {
       continue;
     }
-    seen.add(classes);
+    seenNames.add(name);
     deduped.push(row);
   }
 
@@ -649,9 +947,21 @@ function layerTreeHasDynItems(layers: Layer[]): boolean {
   return false;
 }
 
-function isLikelyDetailPageSlug(pageSlug: string): boolean {
+/**
+ * Detect Webflow CMS template pages from either:
+ *   - the legacy `detail-` slug prefix (older import shape, kept for backwards
+ *     compat in case the slug wasn't stripped at filename time)
+ *   - the original Webflow filename (`detail_werke.html`) attached as
+ *     `__sourceFilename` on the in-memory page object during import.
+ */
+function isLikelyDetailPage(pageSlug: string, sourceFilename?: string): boolean {
   const slug = pageSlug.toLowerCase();
-  return slug.startsWith('detail-') || slug.includes('detail_') || slug.includes('/detail-');
+  if (slug.startsWith('detail-') || slug.includes('detail_')) return true;
+  if (sourceFilename) {
+    const filename = sourceFilename.toLowerCase();
+    if (filename.startsWith('detail-') || filename.startsWith('detail_')) return true;
+  }
+  return false;
 }
 
 function getCollectionFields(
@@ -805,6 +1115,14 @@ function bindDynamicItemTemplate(
   return updated;
 }
 
+/**
+ * Default item limit applied to imported Webflow collection lists. Webflow
+ * exports show the entire collection by default which makes the editor canvas
+ * unreadable on large collections (e.g. 100+ items). Users can raise this in
+ * the Collection Layer settings whenever they need it.
+ */
+const DEFAULT_IMPORTED_COLLECTION_LIMIT = 1;
+
 function bindCollectionLayersForPage(
   layers: Layer[],
   collectionId: string,
@@ -842,7 +1160,7 @@ function bindCollectionLayersForPage(
             id: collectionId,
             sort_by: 'manual',
             sort_order: 'asc',
-            ...(typeof limit === 'number' ? { limit } : {}),
+            limit: typeof limit === 'number' ? limit : DEFAULT_IMPORTED_COLLECTION_LIMIT,
           },
         },
         children: (updated.children || []).map(child =>
@@ -889,8 +1207,9 @@ function enhancePagesWithCmsBindings(
   // Pass 1: Mark dynamic detail pages and assign CMS settings
   for (const entry of pages) {
     const pageSlug = String(entry.page.slug || '');
-    const collection = inferCollectionForPageSlug(pageSlug, collections);
-    if (!collection || !isLikelyDetailPageSlug(pageSlug)) {
+    const sourceFilename = String(entry.page.__sourceFilename || '');
+    const collection = inferCollectionForPageSlug(pageSlug || sourceFilename, collections);
+    if (!collection || !isLikelyDetailPage(pageSlug, sourceFilename)) {
       continue;
     }
 
@@ -1108,14 +1427,81 @@ function getInlineStyle(
   if (!raw) return undefined;
   return raw.replace(/url\(([^)]+)\)/g, (fullMatch, rawValue) => {
     const original = String(rawValue).trim().replace(/^["']|["']$/g, '');
-    if (!original || original.startsWith('data:') || original.startsWith('#') || /^https?:\/\//.test(original)) {
+    if (!original || original.startsWith('data:') || original.startsWith('#')) {
       return fullMatch;
+    }
+    // Remote URLs (e.g. dynamic CMS backgrounds) get pre-downloaded in the
+    // importer pipeline and registered in assetPublicUrlBySource by their
+    // exact URL key. Rewrite to our local public URL when available.
+    if (/^https?:\/\//.test(original)) {
+      const remoteMapped = assetPublicUrlBySource.get(original);
+      return remoteMapped ? `url("${remoteMapped}")` : fullMatch;
     }
     const baseName = path.posix.basename(original);
     const mapped = assetPublicUrlBySource.get(normalizeSlashes(original).replace(/^\.\//, ''))
       || assetPublicUrlBySource.get(baseName);
     return mapped ? `url("${mapped}")` : fullMatch;
   });
+}
+
+/**
+ * Strip `!important` flags and normalise whitespace from a captured CSS value.
+ * Tailwind arbitrary values cannot contain unescaped whitespace (the value is
+ * split by whitespace when written into `class=""`), so leaving `!important`
+ * inside the captured value would generate broken classes like
+ * `text-[1.25rem !important]` which then shatter into `text-[1.25rem`
+ * + `!important]` tokens at runtime.
+ */
+function sanitizeCssValue(value: string): string {
+  return value.replace(/\s*!important\s*$/i, '').replace(/\s+/g, ' ').trim();
+}
+
+function parseCssDeclaration(style: string | undefined, property: string): string | null {
+  if (!style) return null;
+  const escaped = property.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = style.match(new RegExp(`${escaped}\\s*:\\s*([^;]+)`, 'i'));
+  if (!match?.[1]) return null;
+  const cleaned = sanitizeCssValue(match[1]);
+  return cleaned || null;
+}
+
+function inferLayoutDesign(
+  tag: string,
+  classes: string,
+  inlineStyle?: string
+): Record<string, unknown> | undefined {
+  const classSet = new Set(classes.split(/\s+/).map((c) => c.trim()).filter(Boolean));
+  const displayFromStyle = parseCssDeclaration(inlineStyle, 'display')?.toLowerCase();
+  const isGrid = classSet.has('w-layout-grid') || displayFromStyle === 'grid';
+  const isNav = tag === 'nav' || classSet.has('w-nav') || classSet.has('w-nav-menu');
+
+  if (isGrid) {
+    const gridTemplateColumns = parseCssDeclaration(inlineStyle, 'grid-template-columns') || 'repeat(2, 1fr)';
+    const gap = parseCssDeclaration(inlineStyle, 'gap')
+      || parseCssDeclaration(inlineStyle, 'grid-gap')
+      || '16px';
+    return {
+      layout: {
+        isActive: true,
+        display: 'Grid',
+        gridTemplateColumns,
+        gap,
+      },
+    };
+  }
+
+  if (isNav) {
+    return {
+      layout: {
+        isActive: true,
+        display: 'Flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+      },
+    };
+  }
+
+  return undefined;
 }
 
 function mapElementToLayer(
@@ -1151,8 +1537,44 @@ function mapElementToLayer(
   }
 
   const urlMap = assetPublicUrlBySource || new Map<string, string>();
+
+  // Native component detection: each builder is gated behind its own flag
+  // so we can ship one at a time. Defaults are defined in
+  // `DEFAULT_DETECTOR_FLAGS` (only verified-safe builders are enabled).
+  // The richText builder is on by default because it's strictly additive:
+  // it produces a TipTap-shaped layer and never touches CMS bindings or
+  // collection-aware logic, so it cannot break the existing import flow.
+  const nativeLayer = detectWebflowComponent(element, {
+    assetIdBySource,
+    assetPublicUrlBySource: urlMap,
+    warnings,
+    recursivelyMap: (childNode) => mapElementToLayer(childNode, assetIdBySource, warnings, assetPublicUrlBySource),
+  });
+  if (nativeLayer) return nativeLayer;
+
   const inlineStyle = getInlineStyle(element, urlMap);
   const styleAttr = inlineStyle ? { style: inlineStyle } : undefined;
+
+  // Pass through attributes that Webflow's runtime + accessibility tooling
+  // depend on. The most important is `data-w-id` — without it the IX2 engine
+  // (loaded via the user's webflow.js) cannot match elements to their hover /
+  // scroll / click animation definitions.
+  const passthroughAttrs: Record<string, string> = {};
+  for (const attr of element.attributes ? Object.keys(element.attributes) : []) {
+    if (
+      attr.startsWith('data-w-')
+      || attr.startsWith('aria-')
+      || attr === 'role'
+      || attr === 'id'
+      || attr === 'tabindex'
+    ) {
+      const value = element.getAttribute(attr);
+      if (value !== null && value !== undefined) {
+        passthroughAttrs[attr] = value;
+      }
+    }
+  }
+  const baseAttrs = { ...passthroughAttrs, ...(styleAttr || {}) };
 
   if (tag === 'img') {
     const src = element.getAttribute('src') || '';
@@ -1169,7 +1591,7 @@ function mapElementToLayer(
       name: 'image',
       classes: className,
       settings: { tag: 'img' },
-      attributes: styleAttr,
+      attributes: Object.keys(baseAttrs).length > 0 ? baseAttrs : undefined,
       variables: {
         image: {
           src: assetId
@@ -1196,7 +1618,7 @@ function mapElementToLayer(
       name: 'video',
       classes: className,
       attributes: {
-        ...styleAttr,
+        ...baseAttrs,
         controls: element.getAttribute('controls') !== null,
         autoPlay: element.getAttribute('autoplay') !== null,
         loop: element.getAttribute('loop') !== null,
@@ -1217,13 +1639,16 @@ function mapElementToLayer(
     const children = element.childNodes
       .map(child => mapElementToLayer(child, assetIdBySource, warnings, assetPublicUrlBySource))
       .filter((layer): layer is Layer => !!layer);
+    const design = inferLayoutDesign(tag, className, inlineStyle);
 
     return {
       id: randomUUID(),
       name: 'div',
+      ...(inferCustomName(tag, className) ? { customName: inferCustomName(tag, className) } : {}),
       classes: className,
       settings: { tag: 'a' },
-      attributes: styleAttr,
+      attributes: Object.keys(baseAttrs).length > 0 ? baseAttrs : undefined,
+      ...(design ? { design } : {}),
       variables: {
         link: {
           type: 'url',
@@ -1239,6 +1664,7 @@ function mapElementToLayer(
     .filter((layer): layer is Layer => !!layer);
 
   const layerName = SAFE_HTML_TAGS.has(tag) ? tag : 'div';
+  const inferredDesign = inferLayoutDesign(tag, className, inlineStyle);
 
   if (children.length === 0 && className.includes('w-embed')) {
     return null;
@@ -1254,9 +1680,11 @@ function mapElementToLayer(
   return {
     id: randomUUID(),
     name: layerName,
+    ...(inferCustomName(tag, className) ? { customName: inferCustomName(tag, className) } : {}),
     classes: className,
     settings: tag !== 'div' && tag !== layerName ? { tag } : undefined,
-    attributes: styleAttr,
+    attributes: Object.keys(baseAttrs).length > 0 ? baseAttrs : undefined,
+    ...(inferredDesign ? { design: inferredDesign } : {}),
     children,
   };
 }
@@ -1298,6 +1726,11 @@ function buildPagesFromHtml(
         is_dynamic: false,
         settings: {},
         is_published: false,
+        // Internal: original Webflow filename (e.g. `detail_werke.html`).
+        // Stripped before the DB insert; consumed by enhancePagesWithCmsBindings
+        // to recognise CMS-template pages even after the `detail_` URL prefix
+        // has been removed by `slugFromFilename`.
+        __sourceFilename: fileBaseName,
       },
       pageLayers: {
         id: randomUUID(),
@@ -1359,6 +1792,7 @@ async function processWebflowImportInternal(
 
     const htmlFiles: Array<{ filePath: string; content: string }> = [];
     const cssFiles: Array<{ filePath: string; content: string }> = [];
+    const jsFiles: Array<{ filePath: string; content: string }> = [];
     const zipAssets: Array<{ filePath: string; buffer: Buffer; mimeType: string }> = [];
 
     for (const [filePath, zipObject] of Object.entries(zip.files)) {
@@ -1383,6 +1817,14 @@ async function processWebflowImportInternal(
       }
 
       if (lowerPath.endsWith('.js')) {
+        // Capture JS bundles (jQuery + webflow runtime + IX2 + slider/nav toggles).
+        // We do NOT redistribute these files in our codebase; they are extracted
+        // from the user's own Webflow ZIP and re-attached to their published pages
+        // so navigation, dropdowns, sliders and animations keep working.
+        jsFiles.push({
+          filePath: normalizedPath,
+          content: await zipObject.async('text'),
+        });
         continue;
       }
 
@@ -1433,6 +1875,36 @@ async function processWebflowImportInternal(
 
     const assetRows = [...importedAssets];
 
+    const ingestRemoteAssetUrl = async (
+      remoteUrl: string,
+      contextLabel: string
+    ): Promise<void> => {
+      if (assetIdBySource.has(remoteUrl) || remoteAssetCache.has(remoteUrl)) {
+        return;
+      }
+      const downloaded = await downloadRemoteAsset(remoteUrl);
+      if (!downloaded) {
+        warnings.push(`Remote ${contextLabel} asset "${remoteUrl}" could not be downloaded`);
+        return;
+      }
+      const uploaded = await uploadAssetBuffer(downloaded.filename, downloaded.buffer, downloaded.mimeType);
+      remoteAssetCache.set(remoteUrl, uploaded.id);
+      assetIdBySource.set(remoteUrl, uploaded.id);
+      if (uploaded.publicUrl) {
+        assetPublicUrlBySource.set(remoteUrl, uploaded.publicUrl);
+      }
+      assetRows.push({
+        id: uploaded.id,
+        source: 'webflow-import',
+        filename: downloaded.filename.replace(/\.[^/.]+$/, ''),
+        storage_path: uploaded.storagePath,
+        public_url: uploaded.publicUrl || '',
+        file_size: downloaded.buffer.byteLength,
+        mime_type: downloaded.mimeType,
+        is_published: false,
+      });
+    };
+
     // Import asset URLs referenced in CSS (remote and local)
     for (const cssFile of cssFiles) {
       for (const cssUrl of extractCssUrls(cssFile.content)) {
@@ -1442,30 +1914,27 @@ async function processWebflowImportInternal(
         }
 
         if (/^https?:\/\//.test(normalized)) {
-          if (remoteAssetCache.has(normalized)) {
-            continue;
-          }
-          const downloaded = await downloadRemoteAsset(normalized);
-          if (!downloaded) {
-            warnings.push(`Remote CSS asset "${normalized}" could not be downloaded`);
-            continue;
-          }
-          const uploaded = await uploadAssetBuffer(downloaded.filename, downloaded.buffer, downloaded.mimeType);
-          remoteAssetCache.set(normalized, uploaded.id);
-          assetIdBySource.set(normalized, uploaded.id);
-          if (uploaded.publicUrl) {
-            assetPublicUrlBySource.set(normalized, uploaded.publicUrl);
-          }
-          assetRows.push({
-            id: uploaded.id,
-            source: 'webflow-import',
-            filename: downloaded.filename.replace(/\.[^/.]+$/, ''),
-            storage_path: uploaded.storagePath,
-            public_url: uploaded.publicUrl || '',
-            file_size: downloaded.buffer.byteLength,
-            mime_type: downloaded.mimeType,
-            is_published: false,
-          });
+          await ingestRemoteAssetUrl(normalized, 'CSS');
+        }
+      }
+    }
+
+    // Import asset URLs referenced inline in HTML (background-image, srcset,
+    // dynamic CMS-resolved styles, etc). Webflow renders dynamic CMS
+    // backgrounds as `style="background-image:url('https://cdn...')"` —
+    // without this loop those URLs would stay pointing at the original CDN.
+    const inlineUrlRegex = /url\(\s*(['"]?)([^'")]+?)\1\s*\)/g;
+    const seenInlineUrls = new Set<string>();
+    for (const htmlFile of htmlFiles) {
+      const styleAttrRegex = /\sstyle\s*=\s*"([^"]*)"|\sstyle\s*=\s*'([^']*)'/gi;
+      for (const styleMatch of htmlFile.content.matchAll(styleAttrRegex)) {
+        const styleBody = styleMatch[1] || styleMatch[2] || '';
+        for (const urlMatch of styleBody.matchAll(inlineUrlRegex)) {
+          const raw = (urlMatch[2] || '').trim();
+          if (!raw || raw.startsWith('data:') || seenInlineUrls.has(raw)) continue;
+          seenInlineUrls.add(raw);
+          if (!/^https?:\/\//.test(raw)) continue;
+          await ingestRemoteAssetUrl(raw, 'inline-style');
         }
       }
     }
@@ -1608,41 +2077,54 @@ async function processWebflowImportInternal(
               }
             }
           } else if (field.type === 'image' || field.type === 'video' || field.type === 'audio' || field.type === 'document') {
-            const normalized = normalizeSlashes(rawValue).replace(/^\.\//, '');
-            let assetId = assetIdBySource.get(normalized) || assetIdBySource.get(stripTopLevelFolder(normalized));
+            const assetCandidates = splitReferenceCandidates(rawValue);
+            const resolvedAssetIds: string[] = [];
 
-            if (!assetId && /^https?:\/\//.test(normalized)) {
-              if (remoteAssetCache.has(normalized)) {
-                assetId = remoteAssetCache.get(normalized);
-              } else {
-                const downloaded = await downloadRemoteAsset(normalized);
-                if (downloaded) {
-                  const uploaded = await uploadAssetBuffer(downloaded.filename, downloaded.buffer, downloaded.mimeType);
-                  remoteAssetCache.set(normalized, uploaded.id);
-                  assetIdBySource.set(normalized, uploaded.id);
-                  if (uploaded.publicUrl) {
-                    assetPublicUrlBySource.set(normalized, uploaded.publicUrl);
+            for (const candidateRaw of assetCandidates) {
+              const normalized = normalizeSlashes(candidateRaw).replace(/^\.\//, '');
+              let assetId = assetIdBySource.get(normalized) || assetIdBySource.get(stripTopLevelFolder(normalized));
+
+              if (!assetId && /^https?:\/\//.test(normalized)) {
+                if (remoteAssetCache.has(normalized)) {
+                  assetId = remoteAssetCache.get(normalized);
+                } else {
+                  const downloaded = await downloadRemoteAsset(normalized);
+                  if (downloaded) {
+                    const uploaded = await uploadAssetBuffer(downloaded.filename, downloaded.buffer, downloaded.mimeType);
+                    remoteAssetCache.set(normalized, uploaded.id);
+                    assetIdBySource.set(normalized, uploaded.id);
+                    if (uploaded.publicUrl) {
+                      assetPublicUrlBySource.set(normalized, uploaded.publicUrl);
+                    }
+                    assetRows.push({
+                      id: uploaded.id,
+                      source: 'webflow-import',
+                      filename: downloaded.filename.replace(/\.[^/.]+$/, ''),
+                      storage_path: uploaded.storagePath,
+                      public_url: uploaded.publicUrl || '',
+                      file_size: downloaded.buffer.byteLength,
+                      mime_type: downloaded.mimeType,
+                      is_published: false,
+                    });
+                    assetId = uploaded.id;
                   }
-                  assetRows.push({
-                    id: uploaded.id,
-                    source: 'webflow-import',
-                    filename: downloaded.filename.replace(/\.[^/.]+$/, ''),
-                    storage_path: uploaded.storagePath,
-                    public_url: uploaded.publicUrl || '',
-                    file_size: downloaded.buffer.byteLength,
-                    mime_type: downloaded.mimeType,
-                    is_published: false,
-                  });
-                  assetId = uploaded.id;
                 }
+              }
+
+              if (assetId) {
+                resolvedAssetIds.push(assetId);
+              } else {
+                warnings.push(`Asset reference "${candidateRaw}" in ${collection.name}.${header} could not be downloaded/resolved`);
               }
             }
 
-            if (assetId) {
-              finalValue = assetId;
-            } else {
-              warnings.push(`Asset reference "${rawValue}" in ${collection.name}.${header} could not be downloaded/resolved`);
+            if (resolvedAssetIds.length === 0) {
               finalValue = null;
+            } else if (resolvedAssetIds.length === 1) {
+              finalValue = resolvedAssetIds[0];
+            } else {
+              // Preserve multi-asset values from CSV exports (semicolon/comma separated URLs).
+              finalValue = JSON.stringify(resolvedAssetIds);
             }
           } else if (field.type === 'boolean') {
             const lower = rawValue.toLowerCase();
@@ -1668,33 +2150,147 @@ async function processWebflowImportInternal(
       htmlFiles.flatMap(file => extractStylesheetHrefsFromHtml(file.content))
     ));
 
+    // Concatenate JS bundles in a deterministic order (jQuery first, then
+    // webflow runtime, then everything else). The user's own ZIP is the source
+    // of truth — we don't ship any of these files in our codebase, we only
+    // serve them back as part of the user's own published site.
+    const sortJsForRuntime = (filename: string): number => {
+      const lower = filename.toLowerCase();
+      if (lower.includes('jquery')) return 0;
+      if (lower.includes('webflow')) return 1;
+      return 2;
+    };
+    const orderedJsFiles = [...jsFiles].sort((a, b) => {
+      const diff = sortJsForRuntime(a.filePath) - sortJsForRuntime(b.filePath);
+      if (diff !== 0) return diff;
+      return a.filePath.localeCompare(b.filePath);
+    });
+    const importedJs = orderedJsFiles
+      .map(file => `/* ${file.filePath} */\n${file.content}`)
+      .join('\n;\n');
+
     const builtPages = buildPagesFromHtml(htmlFiles, assetIdBySource, assetPublicUrlBySource, warnings);
     const enhancedPages = enhancePagesWithCmsBindings(
       builtPages,
       normalizedCollections,
       fields
     );
-    const pageRows = enhancedPages.map(entry => entry.page);
+    // Strip importer-internal fields (e.g. `__sourceFilename`) so the row
+    // shape matches the `pages` table — extra columns would cause a knex
+    // insert to fail on strict-mode databases.
+    const pageRows = enhancedPages.map((entry) => {
+      const { __sourceFilename, ...cleanRow } = entry.page as Record<string, unknown>;
+      void __sourceFilename;
+      return cleanRow;
+    });
     const pageLayerRows = enhancedPages.map(entry => entry.pageLayers);
     const embeddedCssBlocks = htmlFiles
       .map(file => extractEmbeddedCssFromHtml(file.content))
       .filter(Boolean);
     const baseCss = buildImportedCss(cssFiles, assetPublicUrlBySource, cssOrderFromHtml);
-    const importedCss = embeddedCssBlocks.length > 0
-      ? baseCss + '\n\n' + embeddedCssBlocks.join('\n\n')
-      : baseCss;
-    const { layerStyleRows, styleIdByClassSignature } = buildLayerStyles(
-      cssFiles,
+    // Defaults that keep imported Webflow content readable inside Webwow:
+    // - rich-text images stay inside their container (Webflow renders them
+    //   intrinsic-sized and they overflow our layout otherwise)
+    // - bg-image containers should not collapse when the bg url ends up
+    //   missing (rare, but happens for some CMS items without an image)
+    const webwowImportDefaultsCss = [
+      '/* webwow: import defaults */',
+      '.w-richtext img,',
+      '.rich-text img,',
+      '[data-rich-text] img,',
+      '.w-richtext figure img {',
+      '  max-width: 100%;',
+      '  height: auto;',
+      '  display: block;',
+      '}',
+      '.w-richtext figure {',
+      '  max-width: 100%;',
+      '}',
+    ].join('\n');
+    const importedCss = [baseCss, webwowImportDefaultsCss, ...embeddedCssBlocks]
+      .filter(Boolean)
+      .join('\n\n');
+    const cssSourcesForStyleMapping = [
+      ...cssFiles,
+      ...embeddedCssBlocks.map((content, index) => ({
+        filePath: `embedded-${index + 1}.css`,
+        content,
+      })),
+    ];
+    const {
+      layerStyleRows,
+      styleIdByClassSignature,
+      styleClassesByClassSignature,
+      styleDesignByClassSignature,
+      classTokenToTailwindMap,
+    } = buildLayerStyles(
+      cssSourcesForStyleMapping,
       pageLayerRows as Array<{ layers: Layer[] }>
     );
     const styledPageLayerRows = pageLayerRows.map((pageLayerRow) => ({
       ...pageLayerRow,
       layers: applyLayerStylesToTree(
         (pageLayerRow.layers as Layer[]) || [],
-        styleIdByClassSignature
+        styleIdByClassSignature,
+        styleClassesByClassSignature,
+        styleDesignByClassSignature,
+        classTokenToTailwindMap
       ),
     }));
     const dedupedLayerStyleRows = dedupeLayerStyles(layerStyleRows);
+
+    // ── Self-heal pass (#29) ────────────────────────────────────────────
+    // After dedupe + apply, some layers may carry a `styleId` that no longer
+    // matches a row in `layer_styles` (because dedup collapsed two entries
+    // with the same name, or because applyLayerStylesToTree wrote a stale
+    // signature reference). Sweep the entire tree and:
+    //   1. drop styleIds that point at a non-existent style row, and
+    //   2. relink them to the style whose `classes` matches the layer's
+    //      class signature when possible.
+    // This prevents the "No collection selected" / blank-design-panel
+    // symptoms that surface when the editor follows a dead reference.
+    const validStyleIds = new Set<string>(
+      dedupedLayerStyleRows.map((row) => String(row.id))
+    );
+    const styleIdByExactClasses = new Map<string, string>();
+    for (const row of dedupedLayerStyleRows) {
+      const classes = normalizeClassSignature(String(row.classes || ''));
+      if (classes && !styleIdByExactClasses.has(classes)) {
+        styleIdByExactClasses.set(classes, String(row.id));
+      }
+    }
+    let healedRefs = 0;
+    let droppedRefs = 0;
+    const healLayerTree = (layers: Layer[]): Layer[] =>
+      layers.map((layer) => {
+        const next: Layer = { ...layer };
+        const currentStyleId = (next as { styleId?: string }).styleId;
+        if (currentStyleId && !validStyleIds.has(currentStyleId)) {
+          const replacement = styleIdByExactClasses.get(
+            normalizeClassSignature(getLayerClasses(next))
+          );
+          if (replacement) {
+            (next as { styleId?: string }).styleId = replacement;
+            healedRefs++;
+          } else {
+            delete (next as { styleId?: string }).styleId;
+            droppedRefs++;
+          }
+        }
+        if (next.children?.length) {
+          next.children = healLayerTree(next.children);
+        }
+        return next;
+      });
+    const healedPageLayerRows = styledPageLayerRows.map((row) => ({
+      ...row,
+      layers: healLayerTree((row.layers as Layer[]) || []),
+    }));
+    if (healedRefs + droppedRefs > 0) {
+      warnings.push(
+        `Self-heal: relinked ${healedRefs} layer styleId references, dropped ${droppedRefs} unresolvable refs`
+      );
+    }
 
     result.pages = pageRows.length;
     result.collections = collectionRows.length;
@@ -1716,10 +2312,13 @@ async function processWebflowImportInternal(
         { key: 'timezone', value: 'UTC' },
         { key: 'draft_css', value: importedCss },
         { key: 'published_css', value: importedCss },
+        // JS extracted from the user's own Webflow ZIP (jQuery + webflow runtime
+        // + IX2 + slider/nav toggles). Injected into published pages only.
+        { key: 'imported_js', value: importedJs },
       ],
       assets: assetRows,
       pages: pageRows,
-      page_layers: styledPageLayerRows,
+      page_layers: healedPageLayerRows,
       layer_styles: dedupedLayerStyleRows,
       collections: collectionRows,
       collection_fields: fieldRows,

@@ -31,6 +31,11 @@ export async function validateApiKey(request: NextRequest): Promise<ApiKeyValida
   }
 
   try {
+    const envApiKey = process.env.WEBWOW_API_KEY;
+    if (envApiKey && apiKey === envApiKey) {
+      return { valid: true };
+    }
+
     // Validate against api_keys table
     const key = await validateApiKeyFromRepo(apiKey);
 

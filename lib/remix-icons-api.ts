@@ -40,6 +40,19 @@ export interface RemixIconsParams {
 
 /** Fetch icons from the Remix Icons API */
 export async function fetchRemixIcons(params: RemixIconsParams = {}): Promise<RemixIconsResponse> {
+  // Self-hosted installs without TEMPLATE_API_URL configured: return an empty
+  // payload instead of crashing with an invalid relative URL.
+  if (!WEBWOW_EXTERNAL_API_URL) {
+    return {
+      icons: [],
+      total: 0,
+      categories: [],
+      totalIcons: 0,
+      limit: params.limit ?? 0,
+      offset: params.offset ?? 0,
+    };
+  }
+
   const searchParams = new URLSearchParams();
 
   if (params.search) searchParams.set('search', params.search);

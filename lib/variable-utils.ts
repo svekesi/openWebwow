@@ -271,6 +271,43 @@ export function getImageUrlFromVariable(
   pageCollectionItemData?: Record<string, string> | null,
   useDefault: boolean = true
 ): string | undefined {
+  const normalizeImageCandidate = (value: unknown): string | undefined => {
+    if (value === null || value === undefined) return undefined;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return undefined;
+      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          return normalizeImageCandidate(parsed);
+        } catch {
+          // keep raw string fallback
+        }
+      }
+      if (trimmed.includes(';')) {
+        const first = trimmed.split(';').map((v) => v.trim()).filter(Boolean)[0];
+        return first || undefined;
+      }
+      return trimmed;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const normalized = normalizeImageCandidate(item);
+        if (normalized) return normalized;
+      }
+      return undefined;
+    }
+    if (typeof value === 'object') {
+      const candidateObject = value as Record<string, unknown>;
+      return normalizeImageCandidate(
+        candidateObject.url
+        ?? candidateObject.src
+        ?? candidateObject.public_url
+      );
+    }
+    return String(value);
+  };
+
   if (!src) return undefined;
 
   if (isAssetVariable(src)) {
@@ -305,11 +342,12 @@ export function getImageUrlFromVariable(
       collectionItemData,
       pageCollectionItemData
     );
-    if (!resolvedValue) return undefined;
+    const normalizedValue = normalizeImageCandidate(resolvedValue);
+    if (!normalizedValue) return undefined;
 
     // The field value may be an asset ID - look up the asset to get the URL
     if (getAsset) {
-      const asset = getAsset(resolvedValue);
+      const asset = getAsset(normalizedValue);
       if (asset?.public_url) {
         return asset.public_url;
       }
@@ -320,16 +358,18 @@ export function getImageUrlFromVariable(
 
     // If getAsset is not available or asset not found, return the raw value
     // (might be a URL in text fields)
-    return resolvedValue;
+    return normalizedValue;
   }
 
   if (isDynamicTextVariable(src)) {
     const content = src.data.content;
     // Resolve inline variables if present
-    if (content.includes('<webwow-inline-variable>')) {
-      return resolveInlineVariablesFromData(content, collectionItemData, pageCollectionItemData);
+    if (typeof content === 'string' && content.includes('<webwow-inline-variable>')) {
+      return normalizeImageCandidate(
+        resolveInlineVariablesFromData(content, collectionItemData, pageCollectionItemData)
+      );
     }
-    return content;
+    return normalizeImageCandidate(content);
   }
 
   return undefined;

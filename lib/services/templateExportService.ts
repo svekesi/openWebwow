@@ -475,6 +475,13 @@ export async function exportAndUploadTemplate(
   description = '',
   submitterEmail = ''
 ): Promise<{ success: boolean; error?: string }> {
+  if (!WEBWOW_EXTERNAL_API_URL) {
+    return {
+      success: false,
+      error: 'Template service not configured (TEMPLATE_API_URL is empty).',
+    };
+  }
+
   try {
     // 1. Generate export
     const exportResult = await exportTemplateSQL(

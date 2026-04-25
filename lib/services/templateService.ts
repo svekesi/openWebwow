@@ -58,11 +58,18 @@ export interface ApplyTemplateResult {
 
 /**
  * List available templates and categories from the template service
+ *
+ * Self-hosted installs without TEMPLATE_API_URL configured return empty lists
+ * instead of crashing on an invalid relative URL.
  */
 export async function listTemplatesWithCategories(): Promise<{
   templates: Template[];
   categories: TemplateCategory[];
 }> {
+  if (!WEBWOW_EXTERNAL_API_URL) {
+    return { templates: [], categories: [] };
+  }
+
   const response = await fetch(`${WEBWOW_EXTERNAL_API_URL}/api/templates`, {
     cache: 'no-store',
   });
@@ -98,8 +105,15 @@ export async function listCategories(): Promise<TemplateCategory[]> {
 
 /**
  * Get template details from the template service
+ *
+ * Self-hosted installs without TEMPLATE_API_URL configured return null
+ * instead of crashing on an invalid relative URL.
  */
 export async function getTemplate(id: string): Promise<TemplateDetails | null> {
+  if (!WEBWOW_EXTERNAL_API_URL) {
+    return null;
+  }
+
   const response = await fetch(`${WEBWOW_EXTERNAL_API_URL}/api/templates/${id}`, {
     cache: 'no-store',
   });
@@ -251,6 +265,13 @@ export async function applyTemplate(
   templateId: string,
   tenantId?: string
 ): Promise<ApplyTemplateResult> {
+  if (!WEBWOW_EXTERNAL_API_URL) {
+    return {
+      success: false,
+      error: 'Template service not configured (TEMPLATE_API_URL is empty).',
+    };
+  }
+
   // Test database connection first
   const canConnect = await testKnexConnection();
   if (!canConnect) {

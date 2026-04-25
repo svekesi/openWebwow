@@ -33,6 +33,7 @@
     "type-check": "tsc --noEmit",
     "migrate:make": "NODE_NO_WARNINGS=1 dotenv -- knex migrate:make --knexfile knexfile.ts -x ts",
     "migrate:latest": "NODE_NO_WARNINGS=1 dotenv -- knex migrate:latest --knexfile knexfile.ts",
+    "provision:defaults": "NODE_NO_WARNINGS=1 dotenv -- ts-node scripts/provision-default-integrations.ts",
     "migrate:rollback": "NODE_NO_WARNINGS=1 dotenv -- knex migrate:rollback --knexfile knexfile.ts",
     "migrate:status": "NODE_NO_WARNINGS=1 dotenv -- knex migrate:status --knexfile knexfile.ts",
     "migrate:credentials": "npx ts-node scripts/migrate-credentials.ts",

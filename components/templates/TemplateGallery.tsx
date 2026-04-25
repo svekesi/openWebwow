@@ -72,14 +72,19 @@ export function TemplateGallery({
         setError(null);
 
         const response = await fetch('/api/templates');
+        const data = await response.json().catch(() => null);
 
         if (!response.ok) {
-          throw new Error('Failed to fetch templates');
+          const serverMessage =
+            data && typeof data.error === 'string' ? data.error : null;
+          throw new Error(
+            serverMessage ||
+              `Failed to fetch templates (HTTP ${response.status})`
+          );
         }
 
-        const data = await response.json();
-        setTemplates(data.templates || []);
-        setCategories(data.categories || []);
+        setTemplates(data?.templates || []);
+        setCategories(data?.categories || []);
       } catch (err) {
         console.error('[TemplateGallery] Error fetching data:', err);
         setError(

@@ -5,7 +5,10 @@ import {
   completeWebflowImport,
   updateWebflowImportStatus,
 } from '@/lib/repositories/webflowImportRepository';
-import { processWebflowImport } from '@/lib/services/webflowImportService';
+import {
+  processWebflowImport,
+  convertWebflowToProjectExport,
+} from '@/lib/services/webflowImportService';
 import type { WebflowCsvFile, WebflowImportPayload } from '@/types';
 
 export const dynamic = 'force-dynamic';
@@ -59,11 +62,44 @@ async function parsePayload(request: NextRequest): Promise<WebflowImportPayload>
   };
 }
 
+/**
+ * POST /webwow/api/webflow/import
+ *
+ * Accepts a Webflow ZIP + CSV payload (multipart or JSON) and either:
+ *   • dryRun=true  → only converts (returns stats + warnings, no DB writes)
+ *   • dryRun=false (default) → converts AND applies to the live DB inside a
+ *     single knex transaction, so any failure rolls back without leaving a
+ *     half-imported state.
+ *
+ * The dry-run mode powers the new setup-wizard "Preview before applying"
+ * step (todo #05/#06) and lets external tooling validate a ZIP without
+ * touching production data.
+ */
 export async function POST(request: NextRequest) {
   let importId: string | null = null;
+  const url = new URL(request.url);
+  const dryRun = url.searchParams.get('dryRun') === 'true'
+    || url.searchParams.get('dry_run') === 'true';
 
   try {
     const payload = await parsePayload(request);
+
+    if (dryRun) {
+      // Dry-run: convert only, return stats — never touches the DB.
+      // Useful for the setup-wizard preview screen and CI smoke tests.
+      const conversion = await convertWebflowToProjectExport(payload);
+      return noCache({
+        data: {
+          importId: null,
+          dryRun: true,
+          status: conversion.success ? 'preview' : 'failed',
+          result: conversion.result,
+          warnings: conversion.warnings,
+          errors: conversion.errors,
+          stats: conversion.exportData?.manifest.stats || null,
+        },
+      }, 200);
+    }
 
     // Create a minimal job record (no large payload stored in DB)
     const importJob = await createWebflowImport({ payload: { zipFilename: payload.zipFilename, zipBase64: '', csvFiles: [] } });
@@ -83,6 +119,7 @@ export async function POST(request: NextRequest) {
     return noCache({
       data: {
         importId,
+        dryRun: false,
         status: processingResult.success ? 'completed' : 'failed',
         result: processingResult.result,
         warnings: processingResult.warnings,

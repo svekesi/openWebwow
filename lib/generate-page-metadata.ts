@@ -30,6 +30,14 @@ export interface GlobalPageSettings {
   webwowBadge?: boolean;
   faviconUrl?: string | null;
   webClipUrl?: string | null;
+  /**
+   * JS bundle extracted from a Webflow ZIP import (jQuery + webflow runtime
+   * + IX2 + slider/nav toggles). Served back to the user's published pages so
+   * native Webflow behaviours (nav toggle, dropdowns, sliders, animations)
+   * keep working. Not part of our codebase, only a passthrough of the user's
+   * own ZIP.
+   */
+  importedJs?: string | null;
 }
 
 /** @deprecated Use GlobalPageSettings instead */
@@ -73,6 +81,7 @@ export const fetchGlobalPageSettings = cache(async (): Promise<GlobalPageSetting
     'webwow_badge',
     'favicon_asset_id',
     'web_clip_asset_id',
+    'imported_js',
   ]);
 
   // Fetch favicon and web clip asset URLs if IDs are set
@@ -114,6 +123,7 @@ export const fetchGlobalPageSettings = cache(async (): Promise<GlobalPageSetting
     webwowBadge: settings.webwow_badge ?? true,
     faviconUrl,
     webClipUrl,
+    importedJs: settings.imported_js || null,
   };
 });
 

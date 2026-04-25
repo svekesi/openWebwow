@@ -11,8 +11,9 @@ import { getSettingByKey } from '@/lib/repositories/settingsRepository';
 import { parseAuthCookie, getPasswordProtection, fetchFoldersForAuth } from '@/lib/page-auth';
 import type { Page, PageFolder, Translation, Redirect as RedirectType } from '@/types';
 
-// Static by default for performance, dynamic only when pagination is requested
-export const revalidate = false; // Cache indefinitely until publish invalidates
+// Force runtime rendering so published routes always reflect current DB state.
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 export const dynamicParams = true;
 
 /**
@@ -188,6 +189,7 @@ async function fetchCachedGlobalSettings() {
       webwowBadge: true,
       faviconUrl: null,
       webClipUrl: null,
+      importedJs: null,
     };
   }
 }
@@ -343,6 +345,7 @@ export default async function Page({ params }: PageProps) {
       globalCustomCodeHead={globalSettings.globalCustomCodeHead}
       globalCustomCodeBody={globalSettings.globalCustomCodeBody}
       webwowBadge={globalSettings.webwowBadge}
+      importedJs={globalSettings.importedJs}
     />
   );
 }

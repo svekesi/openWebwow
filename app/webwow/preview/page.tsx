@@ -13,6 +13,11 @@ async function fetchPreviewDraftCss() {
   return (settings.draft_css as string) || undefined;
 }
 
+async function fetchPreviewImportedJs() {
+  const settings = await getSettingsByKeys(['imported_js']);
+  return (settings.imported_js as string) || undefined;
+}
+
 // Force dynamic rendering - no caching for preview
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -43,10 +48,11 @@ export default async function Home() {
     );
   }
 
-  // Fetch draft CSS and color variables
-  const [draftCSS, colorVariablesCss] = await Promise.all([
+  // Fetch draft CSS, color variables, and imported Webflow JS
+  const [draftCSS, colorVariablesCss, importedJs] = await Promise.all([
     fetchPreviewDraftCss(),
     generateColorVariablesCss(),
+    fetchPreviewImportedJs(),
   ]);
 
   // Check password protection for homepage (using all folders for preview)
@@ -106,6 +112,7 @@ export default async function Home() {
       availableLocales={data.availableLocales}
       isPreview={true}
       translations={data.translations}
+      importedJs={importedJs}
     />
   );
 }

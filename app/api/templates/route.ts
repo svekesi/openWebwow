@@ -21,9 +21,9 @@ export async function GET() {
   } catch (error) {
     console.error('[GET /api/templates] Error:', error);
 
-    return noCache(
-      { error: 'Failed to fetch templates' },
-      500
-    );
+    const message =
+      error instanceof Error ? error.message : 'Failed to fetch templates';
+
+    return noCache({ error: message }, 500);
   }
 }

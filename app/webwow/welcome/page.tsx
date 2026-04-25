@@ -81,7 +81,10 @@ export default function WelcomePage() {
   };
 
   // Check if running on Vercel and if env vars are configured
-  // Redirect unauthenticated users to /webwow if setup is already complete
+  // Redirect users to /webwow if setup is already complete — both
+  // authenticated and unauthenticated. Previously we only redirected
+  // unauthenticated users, which left logged-in users stuck on a stale
+  // wizard step from a previous session (e.g. after a `reset-db`).
   useEffect(() => {
     if (isAuthLoading) return;
 
@@ -90,11 +93,18 @@ export default function WelcomePage() {
         const response = await fetch('/webwow/api/setup/status');
         const data = await response.json();
 
-        // If setup is complete, redirect unauthenticated users to /webwow (login screen)
-        // Logged-in users can still access this page
-        if (data.is_setup_complete && !session) {
+        if (data.is_setup_complete) {
           router.push('/webwow');
-          return; // Keep showing loading screen during redirect
+          return;
+        }
+
+        // DATABASE_URL is already set in the environment but migrations
+        // haven't been applied yet. Skip the database-input step entirely
+        // and jump straight to migrations so self-hosted setups (where the
+        // env is wired in via Compose / .env) don't have to retype the
+        // connection string they already configured at install time.
+        if (data.is_configured && currentStep === 'database') {
+          setStep('migrate');
         }
 
         setStatusChecked(true);

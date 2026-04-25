@@ -118,6 +118,13 @@ interface PageRendererProps {
   globalCustomCodeBody?: string | null;
   webwowBadge?: boolean;
   passwordProtection?: PasswordProtectionContext;
+  /**
+   * JS extracted from a Webflow ZIP import (jQuery + webflow runtime + IX2 +
+   * slider/nav toggles). Injected only on live published pages, never inside
+   * the editor canvas — running it in the editor would conflict with React's
+   * click handling for layer selection.
+   */
+  importedJs?: string | null;
 }
 
 /**
@@ -158,6 +165,7 @@ export default async function PageRenderer({
   globalCustomCodeBody,
   webwowBadge = false,
   passwordProtection,
+  importedJs,
 }: PageRendererProps) {
   // Check if this is a 401 error page that needs password form
   const is401Page = page.error_page === 401;
@@ -457,6 +465,20 @@ export default async function PageRenderer({
       {/* Inject page-specific custom body code */}
       {pageCustomCodeBody && (
         <CustomCodeInjector html={pageCustomCodeBody} />
+      )}
+
+      {/*
+        Inject JS extracted from the user's Webflow ZIP import (jQuery +
+        webflow runtime + IX2 + slider/nav toggles). Skipped in the editor
+        preview iframe to avoid jQuery/IX2 racing the React mount and
+        causing the editor to fall back to the "Welcome to Webwow" route.
+        On the published site we always inject it.
+      */}
+      {!isPreview && importedJs && (
+        <script
+          id="webwow-imported-runtime"
+          dangerouslySetInnerHTML={{ __html: importedJs }}
+        />
       )}
 
       {/* Branding-Badge komplett entfernt (Wilhelm/Webwow Whitelabel) */}

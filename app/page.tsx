@@ -7,8 +7,9 @@ import { generatePageMetadata, fetchGlobalPageSettings } from '@/lib/generate-pa
 import { parseAuthCookie, getPasswordProtection, fetchFoldersForAuth } from '@/lib/page-auth';
 import type { Metadata } from 'next';
 
-// Static by default for performance, dynamic only when pagination is requested
-export const revalidate = false; // Cache indefinitely until publish invalidates
+// Force runtime rendering so published site always reflects current DB state.
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
  * Fetch homepage data from database
@@ -54,6 +55,7 @@ async function fetchCachedGlobalSettings() {
       webwowBadge: true,
       faviconUrl: null,
       webClipUrl: null,
+      importedJs: null,
     };
   }
 }
@@ -177,6 +179,7 @@ export default async function Home() {
       globalCustomCodeHead={globalSettings.globalCustomCodeHead}
       globalCustomCodeBody={globalSettings.globalCustomCodeBody}
       webwowBadge={globalSettings.webwowBadge}
+      importedJs={globalSettings.importedJs}
     />
   );
 }

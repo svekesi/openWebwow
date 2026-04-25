@@ -30,6 +30,7 @@ COPY --from=builder /app/knexfile.ts ./knexfile.ts
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY --from=builder /app/lib ./lib
 COPY --from=builder /app/types ./types
+COPY --from=builder /app/next.config.ts ./next.config.ts
 COPY --from=builder /app/docker-entrypoint.sh ./docker-entrypoint.sh
 
 RUN mkdir -p /app/uploads && chown -R nextjs:nodejs /app/uploads /app/.next

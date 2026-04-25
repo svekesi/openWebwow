@@ -14,6 +14,11 @@ async function fetchPreviewDraftCss() {
   return (settings.draft_css as string) || undefined;
 }
 
+async function fetchPreviewImportedJs() {
+  const settings = await getSettingsByKeys(['imported_js']);
+  return (settings.imported_js as string) || undefined;
+}
+
 // Force dynamic rendering - no caching for preview
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -28,10 +33,11 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
   // Fetch draft page and layers data (no caching)
   const data = await fetchPageByPath(slugPath, false);
 
-  // Fetch draft CSS and color variables
-  const [draftCSS, colorVariablesCss] = await Promise.all([
+  // Fetch draft CSS, color variables, and imported Webflow JS
+  const [draftCSS, colorVariablesCss, importedJs] = await Promise.all([
     fetchPreviewDraftCss(),
     generateColorVariablesCss(),
+    fetchPreviewImportedJs(),
   ]);
 
   // If page not found, try to show custom 404 error page
@@ -121,6 +127,7 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
       availableLocales={availableLocales}
       isPreview={true}
       translations={translations}
+      importedJs={importedJs}
     />
   );
 }

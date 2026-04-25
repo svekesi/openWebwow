@@ -1904,8 +1904,14 @@ const LayerItem: React.FC<{
 
     // Handle special cases for void/self-closing elements
     if (htmlTag === 'img') {
+      // Runtime safety: malformed CMS/image values can be non-strings during import edge cases.
+      const normalizedImageUrl = typeof imageUrl === 'string'
+        ? imageUrl
+        : undefined;
       // Use default image if URL is empty or invalid
-      const finalImageUrl = imageUrl && imageUrl.trim() !== '' ? imageUrl : DEFAULT_ASSETS.IMAGE;
+      const finalImageUrl = normalizedImageUrl && normalizedImageUrl.trim() !== ''
+        ? normalizedImageUrl
+        : DEFAULT_ASSETS.IMAGE;
 
       // Resolve intrinsic dimensions: explicit attributes > asset record > URL reverse-lookup
       let imgWidth = layer.attributes?.width as string | undefined;
@@ -1918,9 +1924,9 @@ const LayerItem: React.FC<{
         if (asset && 'height' in asset && asset.height && !imgHeight) imgHeight = String(asset.height);
 
         // CMS images: field variable resolved to a URL — reverse-lookup asset by matching URL
-        if ((!imgWidth || !imgHeight) && resolvedAssets && imageUrl) {
+        if ((!imgWidth || !imgHeight) && resolvedAssets && normalizedImageUrl) {
           for (const entry of Object.values(resolvedAssets)) {
-            if (entry.url === imageUrl) {
+            if (entry.url === normalizedImageUrl) {
               if (!imgWidth && entry.width) imgWidth = String(entry.width);
               if (!imgHeight && entry.height) imgHeight = String(entry.height);
               break;
