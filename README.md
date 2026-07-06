@@ -3,17 +3,14 @@
 A no-code platform that combines a visual HTML editor with a dynamic CMS running on [ycode][ycode-repo]. 
 It serves as an open-source and selfhost Webflow alternative featuring a seamless migration assistant.
 
-### Quick Start
+**Quick Start:** ```docker pull html67/webwow:latest```
 
-Webwow ships as a plug-and-play [Docker](https://docs.docker.com/get-docker/) image: 
-```docker pull html67/webwow:latest```
-
-## Features
-- Docker, no need for Supabase and Vercel
+## Key Features
+- [Docker](https://docs.docker.com/get-docker/), no need for Supabase and Vercel
 - "State of the art" UX Theme
 - Migration Assistant (beta)
 
-## Migration Assistant (beta)
+### Migration Assistant (beta)
 Bring existing sites into Webwow:
 
 | Importer | Files needed |
@@ -21,6 +18,7 @@ Bring existing sites into Webwow:
 | ycode | `export.ycode` file |
 | Webflow | `export.zip` |
 | Webflow CMS | `export.zip` + `collection_A.csv,collection_B.csv` + `www.url.xyz` |
+
 
 ## Configuration
 
@@ -76,7 +74,7 @@ We are working on:
 - Better component and animation Import, universal AI Importer
 - Transition from Tailwind back to native CSS & [HTML67](https://html67.org)
 
-### License
+## License
 
 Webwow is open source software licensed under the [GNU AGPL v3](https://opensource.org).
-Part of [Project Wilhelm](https://projectwilhelm.com) HTML67 is part of [Project Wilhelm](https://projectwilhelm.com) by The Wilhelm Collective, a network of developers on a mission to fully democratise digitisation by 2030
+Part of [Project Wilhelm](https://projectwilhelm.com),a developer collectiv on a mission to fully democratise digitisation by 2030
