@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import DarkModeProvider from '@/components/DarkModeProvider';
@@ -12,6 +12,23 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: 'Webwow - Visual Website Builder',
   description: 'Self-hosted visual website builder',
+  icons: {
+    icon: [
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/favicon-32.png', sizes: '32x32', type: 'image/png' },
+    ],
+    apple: '/apple-touch-icon.png',
+  },
+  manifest: '/site.webmanifest',
+  openGraph: {
+    title: 'Webwow - Visual Website Builder',
+    description: 'Self-hosted visual website builder',
+    images: ['/og-image.png'],
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#0369FF',
 };
 
 export default async function RootLayout({

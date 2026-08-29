@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#0a0a0a"/>
+  <circle cx="1150" cy="70" r="300" fill="#0369FF" opacity="0.16"/>
+  <circle cx="120" cy="600" r="220" fill="#0369FF" opacity="0.07"/>
+  <image x="96" y="150" width="150" height="150" preserveAspectRatio="xMidYMid meet" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgZmlsbD0ibm9uZSI+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTIiIGZpbGw9IiMwMzY5RkYiLz4KICA8dGV4dCB4PSIzMiIgeT0iNDIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMjgiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXdlaWdodD0iYm9sZCIgZmlsbD0id2hpdGUiPlc8L3RleHQ+Cjwvc3ZnPg=="/>
+  <text x="98" y="420" font-family="Shantell Sans" font-size="92" font-weight="700" fill="#fafafa">Website Builder</text>
+  <rect x="102" y="446" width="140" height="6" rx="3" fill="#0369FF"/>
+  <text x="100" y="512" font-family="Shantell Sans" font-size="30" fill="#c8c8c8">Webwow visueller Website-Builder in Nextcloud</text>
+  <text x="100" y="560" font-family="Shantell Sans" font-size="22" fill="#7a7a7a">Part of the Wilhelm Collective</text>
+</svg>
